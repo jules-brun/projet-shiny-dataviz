@@ -35,7 +35,8 @@ ne documentent pas zéro comme code officiel de donnée manquante chez UCI.
 
 MATRICE DES ASSOCIATIONS AVEC L'ABSENCE — QUATRIÈME ONGLET
 
-Le quatrième onglet affiche uniquement la matrice croisée et sa légende.
+Le quatrième onglet affiche la matrice croisée, sa légende et une conclusion
+calculée selon les associations détectées après correction BH.
 Les textes narratifs, fiches, tableaux détaillés, sélecteurs et autres graphiques
 ont été retirés de l'interface. Les trois premiers onglets restent inchangés.
 

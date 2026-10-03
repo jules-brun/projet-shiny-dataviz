@@ -1,0 +1,31 @@
+=== EFFECTIFS DU PERIMETRE PRINCIPAL ===
+  provenance n_total n_complets n_incomplets pct_complets n_avec_1_na
+   cleveland     303        303            0        100.0           0
+   hungarian     293        291            2         99.3           1
+ switzerland     123        116            7         94.3           5
+          va     199        139           60         69.8           7
+ n_avec_2_na_ou_plus pct_diagnostic_1_complets pct_diagnostic_1_incomplets
+                   0                      45.9                          NA
+                   1                      36.1                          50
+                   2                      93.1                         100
+                  53                      78.4                          65
+
+=== NOMBRE DE NA SIMULTANES ===
+               age sexe type_doul_thor ecg_repos pa_repos fc_max angine_effort
+age              0    0              0         0        0      0             0
+sexe             0    0              0         0        0      0             0
+type_doul_thor   0    0              0         0        0      0             0
+ecg_repos        0    0              0         2        0      0             0
+pa_repos         0    0              0         0       60     55            55
+fc_max           0    0              0         0       55     55            55
+angine_effort    0    0              0         0       55     55            55
+depress_st       0    0              0         0       55     54            54
+               depress_st
+age                     0
+sexe                    0
+type_doul_thor          0
+ecg_repos               0
+pa_repos               55
+fc_max                 54
+angine_effort          54
+depress_st             62

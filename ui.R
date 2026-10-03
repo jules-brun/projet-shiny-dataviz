@@ -123,7 +123,9 @@ fluidPage(
     tabPanel("4 · Comprendre les données manquantes",
       div(class = "recit-matrice",
         plotOutput("absence_matrice", width = "1400px", height = "650px")
-      )
+      ),
+      h4("Conclusion"),
+      div(class = "callout", textOutput("absence_conclusion"))
     )
   ),
   div(class = "footer", "UCI Heart Disease · Janosi et al. (1989) · DOI 10.24432/C52P4X · CC BY 4.0")

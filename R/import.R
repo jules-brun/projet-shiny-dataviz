@@ -257,6 +257,238 @@ afficher_bilan(na_par_provenance)
 cat("\nRésumé des NA par provenance :\n")
 afficher_bilan(na_sources)
 
+
+
+
+
+head(heart)
+
+heart_temp <- heart
+
+heart %>%
+  select(-any_of("nb_na")) %>%  # Évite de compter un ancien compteur
+  mutate(nb_na = rowSums(is.na(pick(everything())))) %>%
+  filter(nb_na >= 2) %>%
+  arrange(desc(nb_na))
+
+summary(heart_temp)
+
+
+
+
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# Compter les NA uniquement dans les variables cliniques
+# « variables » est le vecteur défini pour le graphique précédent.
+effectifs_na <- heart_temp %>%
+  mutate(nb_na = rowSums(is.na(pick(all_of(variables))))) %>%
+  count(provenance, nb_na, name = "n_individus") %>%
+  complete(
+    provenance,
+    nb_na = 1:7,
+    fill = list(n_individus = 0)
+  ) %>%
+  filter(nb_na %in% 1:7)
+
+ggplot(
+  effectifs_na,
+  aes(x = factor(nb_na, levels = 1:7),
+      y = n_individus, fill = provenance)
+) +
+  geom_col(
+    position = position_dodge(width = 0.85),
+    width = 0.8
+  ) +
+  geom_text(
+    aes(label = ifelse(n_individus > 0, n_individus, "")),
+    position = position_dodge(width = 0.85),
+    vjust = -0.4,
+    size = 3
+  ) +
+  scale_fill_manual(
+    values = c(
+      cleveland   = "#123B70",
+      hungarian   = "#347FC4",
+      switzerland = "#70B7DD",
+      va          = "#B6D5EC"
+    ),
+    breaks = c("cleveland", "hungarian", "switzerland", "va"),
+    labels = c("Cleveland", "Hongrie", "Suisse", "VA Long Beach")
+  ) +
+  scale_y_continuous(
+    expand = expansion(mult = c(0, 0.12))
+  ) +
+  labs(
+    title = "Nombre de valeurs manquantes par individu",
+    subtitle = "Répartition par provenance",
+    x = "Nombre de NA",
+    y = "Nombre d’individus",
+    fill = "Provenance",
+    caption = "Les individus avec 0 NA ou plus de 7 NA ne sont pas représentés."
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom"
+  )
+
+
+# On supprimme donc les individus avec 5 na ou plus
+
+heart_temp <- heart_temp %>%
+  mutate(nb_na = rowSums(is.na(pick(all_of(variables))))) %>%
+  filter(nb_na < 5) %>%
+  select(-nb_na)
+
+
+
+# Sélectionner les individus hongrois avec exactement 3 NA
+hongrie_3na <- heart_temp %>%
+  mutate(nb_na = rowSums(is.na(pick(all_of(variables))))) %>%
+  filter(provenance == "hungarian", nb_na == 3)
+
+nrow(hongrie_3na)  # Vérifier l'effectif
+hongrie_3na
+
+# On remarque que les 3 NA sont toujours les mêmes variables : pente du segment ST, nb_vaisseaux et test_thallium.
+# On supprime donc ces variables
+
+heart_temp <- heart_temp %>%
+  select(-any_of(c("pente_st", "nb_vaisseaux", "test_thallium", "cholesterol")))
+
+heart_temp <- heart_temp %>%
+  tidyr::drop_na()
+
+
+dim(heart_temp)  # Vérifier l'effectif final
+
+
+
+
+
+
+
+
+
+
+
+
+# Correspondance entre noms des colonnes et libellés affichés
+libelles <- c(
+  age              = "Âge (ans)",
+  sexe             = "Sexe",
+  type_doul_thor    = "Type de douleur thoracique",
+  pa_repos         = "Pression artérielle au repos (mmHg)",
+  cholesterol      = "Cholestérol (mg/dL)",
+  glyc_jeun_elevee  = "Glycémie à jeun > 120 mg/dL",
+  ecg_repos        = "ECG au repos",
+  fc_max           = "Fréquence cardiaque maximale",
+  angine_effort    = "Angine à l'effort",
+  depress_st       = "Dépression du segment ST",
+  pente_st         = "Pente du segment ST",
+  nb_vaisseaux     = "Nombre de vaisseaux visualisés",
+  test_thallium    = "Résultat du test au thallium",
+  diagnostic       = "Diagnostic"
+)
+
+noms_centres <- c(
+  cleveland   = "Cleveland",
+  hungarian   = "Hongrie",
+  switzerland = "Suisse",
+  va          = "VA Long Beach"
+)
+
+# Ne garder que les variables présentes dans heart_temp
+variables <- intersect(names(libelles), names(heart_temp))
+
+# Effectifs actuels par provenance
+effectifs <- heart_temp %>%
+  count(provenance, name = "n")
+
+# Calculer les pourcentages avant de passer au format long :
+# cela fonctionne même si les colonnes ont des types différents.
+tableau_na <- heart_temp %>%
+  group_by(provenance) %>%
+  summarise(
+    across(
+      all_of(variables),
+      ~ 100 * mean(is.na(.x))
+    ),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(
+    cols = all_of(variables),
+    names_to = "variable",
+    values_to = "pct_na"
+  ) %>%
+  left_join(effectifs, by = "provenance") %>%
+  mutate(
+    provenance = factor(provenance, levels = names(noms_centres)),
+    variable = factor(variable, levels = rev(variables)),
+    etiquette = sprintf("%.1f %%", pct_na)
+  )
+
+# Libellés des centres avec leurs effectifs
+libelles_centres <- setNames(
+  paste0(
+    noms_centres[as.character(effectifs$provenance)],
+    "\n(n = ", effectifs$n, ")"
+  ),
+  as.character(effectifs$provenance)
+)
+
+# Graphique
+graphe_na <- ggplot(
+  tableau_na,
+  aes(x = provenance, y = variable, fill = pct_na)
+) +
+  geom_tile(color = "white", linewidth = 0.6) +
+  geom_text(
+    aes(label = etiquette, color = pct_na >= 50),
+    size = 3.3
+  ) +
+  scale_color_manual(
+    values = c("FALSE" = "#222222", "TRUE" = "white"),
+    guide = "none"
+  ) +
+  scale_fill_gradient(
+    low = "#F1F5FA",
+    high = "#10346A",
+    limits = c(0, 100),
+    breaks = c(0, 25, 50, 75, 100),
+    name = "% de NA"
+  ) +
+  scale_x_discrete(labels = libelles_centres) +
+  scale_y_discrete(labels = libelles) +
+  labs(
+    title = "Les valeurs manquantes selon la provenance",
+    subtitle = "Pourcentage calculé dans chaque source, variable par variable",
+    x = NULL,
+    y = NULL,
+    caption = "Source : UCI Heart Disease — données présentes dans heart_temp."
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    axis.text = element_text(color = "#333333"),
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(face = "bold"),
+    plot.caption = element_text(size = 9),
+    legend.position = "right"
+  )
+
+print(graphe_na)
+
+
+# Conclusion pour moi :
+# Etudier Cleveland seul
+# Pour le ML supp les variables avec trop de NA (pente_st, nb_vaisseaux, test_thallium, cholesterol)
+# et sup les ind na restants
+
 # Objets réutilisables ensuite dans Shiny :
 # heart : tableau fusionné ; donnees_par_source : liste des quatre tableaux.
 # na_global, na_par_provenance, na_sources : diagnostics pour tables/graphes.

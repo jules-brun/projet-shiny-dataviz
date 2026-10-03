@@ -201,7 +201,7 @@ synthese_ligne_absence <- function(analyse, x, libelles) {
     "Les nombres d'absences utilisés dépendent de Y ; un faible effectif limite la puissance. Les raisons et effectifs exacts sont consultables dans le tableau détaillé.")
 }
 
-# Seule la matrice est affichée ; aucun autre contrôle dans le quatrième onglet.
+# Matrice et conclusion exploratoire ; aucun réglage de traitement dans cet onglet.
 serveur_tests_absence <- function(input, output, session, analyse, dictionnaire, libelles_sources) {
   libelles <- c(setNames(dictionnaire$libelle, dictionnaire$nom_fr),
                 provenance = "Provenance", diagnostic = "Diagnostic binaire")
@@ -230,4 +230,22 @@ serveur_tests_absence <- function(input, output, session, analyse, dictionnaire,
         axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom") +
       guides(fill = guide_legend(nrow = 2))
   }, res = 110)
+  output$absence_conclusion <- renderText({
+    d <- analyse$resultats
+    associees <- unique(d$variable_absence[is.finite(d$p_ajustee) &
+      d$p_ajustee < analyse$reglages$seuil])
+    constat <- if (!analyse$n_tests_valides) {
+      "Les tests ne permettent pas de conclure à une association avec l'absence."
+    } else if (length(associees) == length(analyse$lignes)) {
+      "Pour chacune des variables étudiées, l'absence de données est associée à au moins une caractéristique observée après correction pour comparaisons multiples."
+    } else if (length(associees)) {
+      "Pour certaines variables étudiées, l'absence de données est associée à au moins une caractéristique observée après correction pour comparaisons multiples."
+    } else {
+      "Aucune association n'a été détectée après correction pour comparaisons multiples ; cela ne démontre pas que les absences sont entièrement aléatoires."
+    }
+    paste(constat,
+      "Ces résultats ne suffisent pas à déterminer le mécanisme des valeurs manquantes ni à choisir automatiquement leur traitement.",
+      "La stratégie de gestion des NA reste donc à définir selon l'objectif de l'analyse, la population étudiée et les hypothèses sur la collecte.")
+  })
+
 }
