@@ -40,6 +40,21 @@ donnees_modelisation[variables_categorielles] <-
 libelles_sources <- c(cleveland = "Cleveland", hungarian = "Hongrie",
                        switzerland = "Suisse", va = "VA Long Beach")
 
+# Référence propre au quatrième onglet, avec un identifiant de ligne source stable.
+source("R/gestion_na.R", local = TRUE)
+source("R/modelisation.R", local = TRUE)
+dictionnaire_na <- creer_dictionnaire_na(import_uci$dictionnaire, variables_categorielles)
+reference_na <- new.env(parent = emptyenv())
+reference_na$donnees <- donnees_uci
+reference_na$donnees$id_ligne <- with(import_uci$details[!import_uci$retirer, ],
+  paste(provenance, ligne_source, sep = ":"))
+lockBinding("donnees", reference_na)
+source("R/comprendre_na.R", local = TRUE)
+source("R/serveur_na.R", local = TRUE)
+source("R/tests_absence.R", local = TRUE)
+# Un seul balayage sur la référence nettoyée, partagé entre les sessions.
+associations_absence <- analyser_absences(reference_na$donnees, dictionnaire_na)
+
 function(input, output, session) {
   output$indicateurs <- renderUI({
     b <- import_uci$bilan_nettoyage
@@ -250,4 +265,9 @@ function(input, output, session) {
            x = NULL, y = "Déviance résiduelle") +
       theme_minimal(base_size = 12)
   }, res = 110)
+  serveur_comprendre_na(input, output, session, reference_na$donnees,
+                        import_uci, dictionnaire_na, libelles_sources)
+  serveur_tests_absence(input, output, session, associations_absence,
+                        dictionnaire_na, libelles_sources)
+
 }
