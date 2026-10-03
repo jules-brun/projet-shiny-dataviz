@@ -4,6 +4,9 @@ fichiers_sources <- file.path("dataset", c("processed.cleveland.data", "processe
   "processed.switzerland.data", "processed.va.data"))
 empreintes <- tools::md5sum(fichiers_sources)
 invisible(capture.output(serveur <- source("server.R")$value))
+# Les anciens calculs narratifs restent testables indépendamment de l'interface.
+source("R/comprendre_na.R")
+source("R/serveur_na.R")
 interface <- source("ui.R")$value
 reference <- reference_na$donnees
 original <- reference
@@ -88,7 +91,7 @@ shiny::testServer(serveur, {
     "carte_na", "na_global_ui", "na_sources_ui", "na_detail", "origine_na", "bilan_modelisation",
     "effectifs_modelisation", "formules_modeles", "comparaison_modeles", "conclusion_modeles")) invisible(output[[nom]])
   stopifnot(grepl("ANOVA", output$resultat_modeles))
-  invisible(output$recit_fiche_bilan)
+  invisible(output$absence_matrice)
 })
 stopifnot(identical(reference, original), identical(reference_na$donnees, original),
           identical(tools::md5sum(fichiers_sources), empreintes))

@@ -17,7 +17,7 @@ stopifnot(all(paire$contingence == manuel), r$n_utilise == 5,
   isTRUE(all.equal(r$v_cramer, sqrt(suppressWarnings(chisq.test(manuel, correct = FALSE))$statistic / 5), check.attributes = FALSE)))
 # Aucun cas complet global n'est exigé : z manque chez des patients inclus pour y.
 stopifnot(sum(complete.cases(d[c("x", "y", "z")])) < r$n_utilise)
-a <- analyser_absences(d, dictionnaire_test)
+a <- analyser_absences(d, dictionnaire_test, variables_absence = c("x", "y", "z"))
 valide <- a$resultats$statut == "Calculé"
 stopifnot(isTRUE(all.equal(a$resultats$p_ajustee[valide], p.adjust(a$resultats$p_brute[valide], "BH"))),
   all(is.na(a$resultats$p_ajustee[!valide])),
@@ -26,7 +26,7 @@ stopifnot(isTRUE(all.equal(a$resultats$p_ajustee[valide], p.adjust(a$resultats$p
 # Sans NA : aucune ligne. Tout X absent : un statut unique, non-calcul explicite.
 sans_na <- d
 sans_na[c("x", "y", "z")] <- lapply(sans_na[c("x", "y", "z")], function(x) replace(x, is.na(x), 1))
-stopifnot(nrow(analyser_absences(sans_na, dictionnaire_test)$resultats) == 0)
+stopifnot(nrow(analyser_absences(sans_na, dictionnaire_test, variables_absence = c("x", "y", "z"))$resultats) == 0)
 entier <- d
 entier$x <- NA_real_
 pp <- preparer_variables_absence(entier, dictionnaire_test)
@@ -51,7 +51,7 @@ quant <- d
 quant$y <- c(0, 10, 20, 30, 40, NA)
 dict_quant <- dictionnaire_test
 dict_quant$type[dict_quant$nom_fr == "y"] <- "Quantitative"
-qa <- analyser_absences(quant, dict_quant)
+qa <- analyser_absences(quant, dict_quant, variables_absence = c("x", "y", "z"))
 for (x in qa$lignes) if (x != "y")
   stopifnot(identical(colnames(qa$paires[[cle_paire_absence(x, "y")]]$contingence),
     levels(droplevels(qa$preparation$valeurs$y[!is.na(quant$y)]))))
@@ -83,7 +83,8 @@ empreintes <- tools::md5sum(file.path("dataset", unname(import_uci$fichiers)))
 a <- associations_absence
 stopifnot(nrow(a$resultats) == length(a$lignes) * length(a$colonnes),
   a$n_total == nrow(original),
-  identical(a$lignes, dictionnaire_na$nom_fr[vapply(original[dictionnaire_na$nom_fr], anyNA, logical(1))]))
+  identical(a$lignes, variables_absence_ciblees),
+  !"ecg_repos" %in% a$lignes)
 for (i in which(a$resultats$statut != "Non applicable")) {
   r <- a$resultats[i, ]
   tab <- a$paires[[cle_paire_absence(r$variable_absence, r$variable_croisee)]]$contingence
@@ -92,31 +93,14 @@ for (i in which(a$resultats$statut != "Non applicable")) {
 }
 valide <- a$resultats$statut == "Calculé"
 stopifnot(isTRUE(all.equal(a$resultats$p_ajustee[valide], p.adjust(a$resultats$p_brute[valide], "BH"))))
-serveur_test <- function(input, output, session) {
-  etat <- serveur_tests_absence(input, output, session, a, dictionnaire_na, libelles_sources)
-}
-shiny::testServer(serveur_test, {
-  for (nom in c("absence_perimetre", "absence_matrice", "absence_details", "absence_classes", "absence_syntheses")) invisible(output[[nom]])
-  # Consultation de toutes les cellules, y compris les non-calculables.
-  for (i in seq_len(nrow(a$resultats))) {
-    r <- a$resultats[i, ]
-    session$setInputs(absence_x = r$variable_absence, absence_y = r$variable_croisee)
-    stopifnot(identical(etat$resultat_paire()$p_ajustee, r$p_ajustee))
-    invisible(output$absence_paire_resume)
-    if (r$statut != "Non applicable" && ncol(etat$paire()$contingence) > 0) {
-      invisible(output$absence_contingence)
-      invisible(output$absence_proportions)
-      invisible(output$absence_barres)
-      prop <- etat$proportions()
-      stopifnot(sum(prop$Effectif) == r$n_utilise, sum(prop$X_manquantes) == r$n_x_manquantes)
-    }
-  }
-})
+# Le quatrième panneau n'affiche plus que la matrice.
+interface <- source("ui.R")$value
+html <- as.character(interface)
+stopifnot(grepl('absence_matrice', html),
+  !grepl('recit_variable|recit_nettoyage|absence_details|absence_x|absence_syntheses', html))
 shiny::testServer(serveur, {
-  session$setInputs(absence_x = "cholesterol", absence_y = "provenance", recit_variable = "cholesterol", variable_modele = "cholesterol")
+  session$setInputs(variable_modele = "cholesterol")
   invisible(output$absence_matrice)
-  invisible(output$absence_barres)
-  invisible(output$recit_fiche_bilan)
   stopifnot(grepl("ANOVA", output$resultat_modeles))
 })
 stopifnot(identical(original, reference_na$donnees),

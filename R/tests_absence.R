@@ -1,5 +1,8 @@
 # Matrice exploratoire sur les données nettoyées avant imputation.
 # Les catégories viennent du dictionnaire ; aucun identifiant n'entre dans les tests.
+# Seules ces neuf variables constituent les lignes d'indicateurs d'absence.
+variables_absence_ciblees <- c("pa_repos", "cholesterol", "glyc_jeun_elevee",
+  "fc_max", "angine_effort", "depress_st", "pente_st", "nb_vaisseaux", "test_thallium")
 reglages_tests_absence <- list(n_classes = 3L, quantile_type = 7L,
   B = 100000L, graine = 20261003L, seuil = .05)
 
@@ -143,10 +146,12 @@ tester_paire_absence <- function(donnees, x, y, preparation,
 
 cle_paire_absence <- function(x, y) paste(x, y, sep = "::")
 
-analyser_absences <- function(donnees, dictionnaire, reglages = reglages_tests_absence) {
+analyser_absences <- function(donnees, dictionnaire, reglages = reglages_tests_absence,
+                               variables_absence = variables_absence_ciblees) {
   stopifnot(reglages$n_classes >= 2, reglages$n_classes == floor(reglages$n_classes),
             reglages$B > 0, reglages$B == floor(reglages$B))
-  lignes <- dictionnaire$nom_fr[vapply(donnees[dictionnaire$nom_fr], function(x) anyNA(x), logical(1))]
+  candidates <- intersect(variables_absence, dictionnaire$nom_fr)
+  lignes <- candidates[vapply(donnees[candidates], anyNA, logical(1))]
   colonnes <- c(dictionnaire$nom_fr, "provenance", "diagnostic")
   preparation <- preparer_variables_absence(donnees, dictionnaire, reglages)
   paires <- list()
@@ -196,12 +201,10 @@ synthese_ligne_absence <- function(analyse, x, libelles) {
     "Les nombres d'absences utilisés dépendent de Y ; un faible effectif limite la puissance. Les raisons et effectifs exacts sont consultables dans le tableau détaillé.")
 }
 
-# Sorties de la matrice : calcul partagé au démarrage, consultation réactive des paires.
+# Seule la matrice est affichée ; aucun autre contrôle dans le quatrième onglet.
 serveur_tests_absence <- function(input, output, session, analyse, dictionnaire, libelles_sources) {
   libelles <- c(setNames(dictionnaire$libelle, dictionnaire$nom_fr),
                 provenance = "Provenance", diagnostic = "Diagnostic binaire")
-  output$absence_perimetre <- renderText(paste(analyse$perimetre, "—", analyse$n_total,
-    "observations ;", analyse$n_tests_valides, "tests valides dans la famille corrigée par Benjamini-Hochberg."))
   output$absence_matrice <- renderPlot({
     d <- analyse$resultats
     validate(need(nrow(d) > 0, "Aucune variable explicative ne contient de NA dans ce périmètre."))
@@ -221,102 +224,10 @@ serveur_tests_absence <- function(input, output, session, analyse, dictionnaire,
       scale_y_discrete(labels = libelles, drop = FALSE) +
       labs(x = "Variable Y croisée (sur les observations où elle est renseignée)",
         y = "Variable X dont on étudie l'absence", fill = NULL,
-        caption = "Cellules : p-values ajustées BH. Diagonale non testée. Les p-values Fisher Monte-Carlo sont estimées.") +
+        caption = paste(analyse$n_total, "observations nettoyées des quatre centres, sans imputation —",
+          analyse$n_tests_valides, "tests valides, correction BH globale. P-values Monte-Carlo estimées ; diagonale non testée.")) +
       theme_minimal(base_size = 10) + theme(panel.grid = element_blank(),
         axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom") +
       guides(fill = guide_legend(nrow = 2))
   }, res = 110)
-  langue <- list(search = "Rechercher :", lengthMenu = "Afficher _MENU_ lignes",
-    info = "Lignes _START_ à _END_ sur _TOTAL_", infoEmpty = "Aucune ligne",
-    infoFiltered = "(filtrées parmi _MAX_ lignes)", emptyTable = "Aucune donnée",
-    zeroRecords = "Aucune ligne correspondante",
-    paginate = list(first = "Première", last = "Dernière", "next" = "Suivante", previous = "Précédente"))
-  output$absence_details <- DT::renderDT({
-    d <- analyse$resultats
-    d$variable_absence <- unname(libelles[d$variable_absence])
-    d$variable_croisee <- unname(libelles[d$variable_croisee])
-    d$p_brute <- formater_p_absence(d$p_brute)
-    d$p_ajustee <- formater_p_absence(d$p_ajustee)
-    noms <- c(variable_absence = "Absence de X", variable_croisee = "Variable Y",
-      n_utilise = "N utilisé", n_exclus_y_na = "Exclus : Y manquante", n_x_manquantes = "X manquantes",
-      n_x_observees = "X observées", n_modalites_y = "Modalités Y", methode = "Test utilisé",
-      attendu_min = "Minimum attendu", proportion_attendus_inf_5 = "Proportion attendus < 5",
-      statistique_pearson = "Statistique Pearson non corrigée", ddl = "DDL Pearson",
-      p_brute = "P-value brute", p_ajustee = "P-value ajustée BH", v_cramer = "V de Cramér",
-      statut = "Statut", raison = "Raison de non-calcul", simule = "P-value estimée", B = "Réplications B",
-      graine = "Graine", avertissement = "Avertissement", affichage = "Lecture exploratoire")
-    names(d) <- unname(noms[names(d)])
-    DT::datatable(d, rownames = FALSE, filter = "top",
-      options = list(scrollX = TRUE, pageLength = 10, language = langue))
-  })
-  output$absence_classes <- DT::renderDT({
-    d <- analyse$preparation$classes
-    d$variable <- unname(libelles[d$variable])
-    names(d) <- c("Variable", "Classe exploratoire", "Borne inférieure", "Borne supérieure", "Convention", "Effectif")
-    DT::datatable(d, rownames = FALSE,
-      options = list(scrollX = TRUE, pageLength = 15, language = langue))
-  })
-  updateSelectInput(session, "absence_x", choices = setNames(analyse$lignes, libelles[analyse$lignes]),
-                    selected = head(analyse$lignes, 1))
-  updateSelectInput(session, "absence_y", choices = setNames(analyse$colonnes, libelles[analyse$colonnes]),
-                    selected = "provenance")
-  paire <- reactive({
-    req(input$absence_x %in% analyse$lignes, input$absence_y %in% analyse$colonnes)
-    analyse$paires[[cle_paire_absence(input$absence_x, input$absence_y)]]
-  })
-  resultat_paire <- reactive({
-    idx <- analyse$resultats$variable_absence == input$absence_x & analyse$resultats$variable_croisee == input$absence_y
-    analyse$resultats[idx, , drop = FALSE]
-  })
-  proportions <- reactive({
-    t <- paire()$contingence
-    validate(need(!is.null(t), "Non applicable : l'absence de X n'est pas croisée avec X."),
-      need(ncol(t) > 0, "Aucune catégorie de Y observée."))
-    total <- colSums(t)
-    manquantes <- if ("Manquante (1)" %in% rownames(t)) t["Manquante (1)", ] else rep(0L, ncol(t))
-    data.frame(Catégorie = colnames(t), Effectif = as.integer(total),
-      X_manquantes = as.integer(manquantes), Pourcentage = 100 * as.numeric(manquantes) / total)
-  })
-  output$absence_paire_resume <- renderText({
-    r <- resultat_paire()
-    req(nrow(r) == 1L)
-    if (r$statut == "Non applicable") return(paste("Non applicable :", r$raison))
-    paste(r$n_utilise, "observations utilisées ;", r$n_exclus_y_na, "exclues car Y manque ;",
-      r$n_x_manquantes, "X manquantes et", r$n_x_observees, "X observées.",
-      if (r$statut == "Calculé") paste("Test :", r$methode, "; p brute =", formater_p_absence(r$p_brute),
-        "; p ajustée BH =", formater_p_absence(r$p_ajustee),
-        if (r$simule) paste("(estimée, B =", r$B, ").") else ".") else paste(r$statut, ":", r$raison))
-  })
-  output$absence_contingence <- renderTable({
-    t <- paire()$contingence
-    validate(need(!is.null(t), "Non applicable."), need(ncol(t) > 0, "Aucune catégorie renseignée."))
-    t <- as.matrix(t)
-    if (input$absence_y == "provenance") colnames(t) <- unname(libelles_sources[colnames(t)])
-    if (input$absence_y == "diagnostic") colnames(t) <- ifelse(colnames(t) == "0", "Absence (0)", "Présence (1)")
-    data.frame(Statut = rownames(t), t, check.names = FALSE)
-  })
-  output$absence_proportions <- renderTable(proportions(), digits = 1)
-  output$absence_barres <- renderPlot({
-    d <- proportions()
-    if (input$absence_y == "provenance") d$Catégorie <- unname(libelles_sources[d$Catégorie])
-    if (input$absence_y == "diagnostic") d$Catégorie <- ifelse(d$Catégorie == "0", "Absence (0)", "Présence (1)")
-    d$Catégorie <- factor(d$Catégorie, levels = d$Catégorie)
-    ggplot(d, aes(Catégorie, Pourcentage)) + geom_col(fill = "#165DDE", width = .55) +
-      geom_text(aes(label = sprintf("%.1f %%\n%d/%d", Pourcentage, X_manquantes, Effectif)), vjust = -.3, size = 3.2) +
-      scale_y_continuous(limits = c(0, 115), breaks = seq(0, 100, 25), labels = function(x) paste0(x, " %")) +
-      labs(x = libelles[[input$absence_y]], y = paste("Absence de", libelles[[input$absence_x]]),
-        caption = "Dans chaque catégorie de Y : X manquantes / observations utilisées.") +
-      theme_minimal(base_size = 10) + theme(axis.text.x = element_text(angle = 20, hjust = 1))
-  }, res = 110)
-  output$absence_syntheses <- renderUI({
-    tagList(lapply(analyse$lignes, function(x) tags$details(
-      tags$summary(paste("Absence de", libelles[[x]])),
-      p(synthese_ligne_absence(analyse, x, libelles)),
-      {
-        d <- analyse$resultats[analyse$resultats$variable_absence == x & analyse$resultats$statut %in% c("Non calculable", "Erreur de calcul"), ]
-        if (nrow(d)) tags$ul(lapply(seq_len(nrow(d)), function(i) tags$li(paste(libelles[[d$variable_croisee[i]]], ":", d$raison[i]))))
-      }
-    )))
-  })
-  invisible(list(paire = paire, proportions = proportions, resultat_paire = resultat_paire))
 }
