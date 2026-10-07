@@ -293,3 +293,233 @@ if (acm_disponible && length(variables_actives) >= 2L) {
 Les axes décrivent des profils de présence et d'absence, pas les valeurs
 cliniques elles-mêmes. Ces diagnostics ne suffisent pas à déterminer le
 mécanisme des données manquantes (MCAR, MAR ou MNAR).
+
+## 13. Définir le protocole du benchmark conditionnel
+
+Ce benchmark évalue **chaque cible séparément sur ses valeurs réellement
+observées**. À chaque répétition, 10 % de ces observations (arrondi inférieur)
+seront masquées uniformément sans remise. Les lignes où la cible est déjà NA
+ne participent ni à l'apprentissage ni au score de cette cible. Elles restent
+intactes dans `don`. Chaque modèle reçoit exactement le même apprentissage
+et le même test ; la vraie cible du test lui est inaccessible.
+
+Les résultats mesurent donc la reconstruction de valeurs observées sous
+masquage aléatoire. Ils ne démontrent pas la précision sur les NA naturels,
+notamment si leur distribution diffère selon les sites. Les prédicteurs peuvent
+contenir des NA : leurs médianes, modes, niveaux catégoriels et standardisations
+sont calculés **sur l'apprentissage uniquement**. Des indicateurs d'absence
+complètent les prédicteurs quantitatifs. Une catégorie du test absente de
+l'apprentissage est remplacée par le mode appris.
+
+Le diagnostic est exclu par défaut des prédicteurs, pour un usage où il n'est pas
+encore connu. La provenance est incluse comme prédicteur catégoriel. Modifier
+`predicteurs_benchmark` permet d'évaluer un autre contexte, dans un nouveau
+répertoire de résultats.
+
+```{r protocole_benchmark}
+source("R/benchmark_imputation.R", encoding = "UTF-8")
+# Installer au besoin :
+# install.packages(c("ranger", "FNN", "FactoMineR", "nnet", "mice", "digest"))
+
+types_benchmark <- c(
+  age = "quantitative", sexe = "nominale", type_doul_thor = "nominale",
+  pa_repos = "quantitative", cholesterol = "quantitative",
+  glyc_jeun_elevee = "nominale", ecg_repos = "nominale", fc_max = "quantitative",
+  angine_effort = "nominale", depress_st = "quantitative", pente_st = "ordinale",
+  nb_vaisseaux = "discrete", test_thallium = "nominale", provenance = "nominale"
+)
+# Correspondance ordinale : pente_st conserve ici l'ordre des codes 1, 2, 3.
+# L'erreur absolue sur ses codes est une métrique secondaire ; le taux d'erreur
+# demeure la métrique principale, ces codes n'étant pas une mesure continue.
+predicteurs_benchmark <- names(types_benchmark)
+donnees_benchmark <- don[predicteurs_benchmark]
+cibles_benchmark <- names(types_benchmark)[
+  vapply(donnees_benchmark, anyNA, logical(1))
+]
+seed_globale <- 20261007L 
+proportion_masquee <- 0.10  # Doit rester strictement inférieure à 0.20.
+n_repetitions <- 30L       # Augmenter par exemple à 100 ou 500 pour prolonger.
+n_workers <- 1L           # Linux/macOS : augmenter pour paralléliser les tâches.
+dossier_benchmark <- "resultats/benchmark_imputation"
+parametres_benchmark <- list(
+  num.trees = 200L, k = 5L, ncp = 5L, mice_m = 5L, em_maxit = 100L
+)
+modeles_a_tester <- modeles_imputation[
+  c("mean", "median", "mode", "RandomForest", "Knn", "ACP", "EM", "AFDM", "mice")
+]
+print(data.frame(
+  variable = cibles_benchmark, type = types_benchmark[cibles_benchmark],
+  n_observe = vapply(donnees_benchmark[cibles_benchmark], function(x) sum(!is.na(x)), integer(1)),
+  n_na_naturels = vapply(donnees_benchmark[cibles_benchmark], function(x) sum(is.na(x)), integer(1)),
+  row.names = NULL
+))
+```
+
+## 14. Fonctions et modèles d'imputation
+
+Les fonctions génériques sont dans `R/benchmark_imputation.R`, chargé dans la
+cellule précédente. `benchmark_imputation()` accepte une liste nommée de
+fonctions : ajouter un modèle ne nécessite pas de boucle spécifique par cible.
+Une fonction reçoit `train`, `test`, `cible`, `type`, `types`, `parametres` et
+`seed`, puis renvoie une prédiction par ligne de `test`. La cible n'existe pas
+parmi les colonnes de `test`.
+
+| Modèle | Méthode évaluée |
+|:--|:--|
+| mean | Moyenne de la cible quantitative observée dans l'apprentissage |
+| median | Médiane quantitative ; projection sur un code appris pour ordinal/discret |
+| mode | Modalité la plus fréquente, référence utile pour les catégories |
+| RandomForest | Régression ou classification ranger, 200 arbres par défaut |
+| Knn | Voisins sur prédicteurs standardisés et catégories encodées ; moyenne ou vote |
+| ACP | ACP des prédicteurs encodés, puis régression linéaire ou multinomiale sur les composantes |
+| EM | EM gaussien avec moments conditionnels, puis espérance conditionnelle de la cible quantitative ; prédicteurs quantitatifs uniquement |
+| AFDM | AFDM/FAMD des prédicteurs mixtes, puis régression linéaire ou multinomiale sur les composantes |
+| mice | PMM quantitative, logreg binaire, polyreg nominale, polr ordinale ; agrégation de 5 imputations |
+
+ACP et AFDM sont ici des **modèles conditionnels sur composantes**, et non des
+reconstructions conjointes par `imputePCA` ou `imputeFAMD`. Les hyperparamètres
+sont fixés à l'avance ; ils ne sont pas optimisés sur les masques de test.
+EM suppose un modèle gaussien et n'est pas appliqué aux catégories. MICE
+impute uniquement la cible après le prétraitement commun des prédicteurs :
+il ne s'agit pas d'une chaîne multivariée complète. Les lignes de test sont
+exclues de l'ajustement avec `ignore`, conformément à la
+[documentation de mice](https://amices.org/mice/reference/mice).
+Les NA naturels des prédicteurs sont conservés pour EM et intégrés à son estimation.
+
+Les codes prédits pour les cibles ordinales ou discrètes sont projetés sur les
+codes présents dans l'apprentissage. Les scores portent sur ces prédictions
+finales. Les méthodes inapplicables, erreurs de package ou d'ajustement et
+avertissements sont conservés explicitement dans les résultats.
+
+```{r fonctions_benchmark}
+print(names(modeles_a_tester))
+print(args(benchmark_imputation))
+print(args(resumer_benchmark))
+# Exemple de restriction à une seule cible :
+# benchmark_imputation(donnees_benchmark, types_benchmark,
+#   modeles = modeles_a_tester, cibles = "cholesterol", repetitions = 100L,
+#   dossier = "resultats/benchmark_cholesterol")
+```
+
+## 15. Exécuter ou reprendre les simulations
+
+Chaque couple cible/répétition possède un fichier RDS contenant les scores,
+les indices exacts du masque, les lignes d'apprentissage et les versions de la
+session R. La sauvegarde utilise un fichier temporaire puis un renommage.
+Une interruption peut nécessiter de recalculer la répétition en cours, mais
+les répétitions terminées sont rechargées. Les seeds sont déterminées par la
+seed globale, le nom de la cible, la répétition et le modèle ; le nombre de
+workers et l'ordre d'exécution ne changent pas les résultats.
+
+Pour prolonger la même expérience, augmenter `n_repetitions` et relancer les
+cellules 13 et 15. Pour changer les données, modèles, types, paramètres, seed,
+proportion ou versions des packages, utiliser un **nouveau dossier** : un
+manifeste empêche de mélanger des protocoles incompatibles. Les échecs enregistrés
+sont repris comme tels ; pour retenter une tâche à configuration identique,
+supprimer uniquement son fichier `variable_rep_XXXXX.rds`.
+
+La parallélisation utilise des processus sous Linux/macOS ; sous Windows,
+l'exécution reste séquentielle. Ranger utilise un seul thread par tâche.
+Ne pas lancer simultanément deux benchmarks dans le même dossier.
+
+```{r execution_benchmark}
+resultats_benchmark <- benchmark_imputation(
+  donnees = donnees_benchmark, types = types_benchmark,
+  modeles = modeles_a_tester, cibles = cibles_benchmark,
+  repetitions = n_repetitions, proportion = proportion_masquee,
+  seed = seed_globale, dossier = dossier_benchmark,
+  workers = n_workers, parametres = parametres_benchmark
+)
+print(head(resultats_benchmark[
+  c("variable", "modele_imputation", "repetition", "metrique", "valeur", "statut")
+], 30))
+print(unique(resultats_benchmark[resultats_benchmark$statut != "ok",
+  c("variable", "modele_imputation", "statut", "message")]))
+```
+
+## 16. Résumer les erreurs et leur variabilité
+
+Les sorties longues comportent `variable | modele_imputation | repetition |
+metrique | valeur`, plus des colonnes de traçabilité. RMSE et MAE sont calculées
+pour les variables quantitatives ; taux d'erreur et accuracy pour les catégories ;
+RMSE et MAE sont ajoutées pour les variables ordinales ou discrètes.
+
+Le résumé indique la moyenne, l'écart-type, la médiane, les quantiles 2,5 et
+97,5 % des scores de simulation et un intervalle t approximatif autour de la
+moyenne. Ces intervalles décrivent la variabilité du masquage **sur ce dataset
+fixe**, pas l'incertitude de généralisation à de nouveaux patients. Le nom
+`erreur_moyenne` représente une accuracy moyenne sur les lignes `accuracy` :
+pour cette métrique seulement, une valeur plus élevée est meilleure.
+Les échecs sont exclus du résumé, mais leur nombre doit être examiné.
+
+```{r resume_benchmark}
+resume_benchmark <- resumer_benchmark(resultats_benchmark)
+print(resume_benchmark, row.names = FALSE)
+print(with(resultats_benchmark[!duplicated(resultats_benchmark[
+  c("variable", "modele_imputation", "repetition")]), ],
+  table(variable, modele_imputation, statut)))
+sauver_rds_atomique(resume_benchmark, file.path(dossier_benchmark, "resume.rds"))
+write.csv(resume_benchmark, file.path(dossier_benchmark, "resume.csv"), row.names = FALSE)
+```
+
+## 17. Comparer les modèles et retenir un candidat par variable
+
+Le classement utilise RMSE pour une cible quantitative et le taux d'erreur pour
+les autres. Il est établi **sur l'intersection des répétitions réussies de tous
+les modèles applicables** : un modèle ne peut pas profiter de masques plus faciles
+parce qu'il a échoué ailleurs. Les modèles sans aucun succès sont signalés et
+exclus du classement. Les différences minimes et les rares catégories doivent
+être examinées avant de retenir un gagnant. Aucune imputation des NA naturels
+n'est effectuée à cette étape.
+
+```{r classement_benchmark}
+classements <- lapply(cibles_benchmark, function(cible) {
+  metrique <- if (types_benchmark[[cible]] == "quantitative") "RMSE" else "taux_erreur"
+  d <- resultats_benchmark[resultats_benchmark$variable == cible &
+    resultats_benchmark$metrique == metrique & resultats_benchmark$statut == "ok" &
+    is.finite(resultats_benchmark$valeur), ]
+  if (!nrow(d)) return(NULL)
+  modeles_valides <- unique(d$modele_imputation)
+  repetitions_communes <- Reduce(intersect, lapply(modeles_valides, function(m)
+    d$repetition[d$modele_imputation == m]))
+  if (!length(repetitions_communes)) {
+    message("Aucune répétition réussie commune pour ", cible)
+    return(NULL)
+  }
+  s <- resumer_benchmark(d[d$repetition %in% repetitions_communes, ])
+  s <- s[order(s$erreur_moyenne, s$modele_imputation), ]
+  s$rang <- rank(s$erreur_moyenne, ties.method = "min")
+  s
+})
+classement_benchmark <- do.call(rbind, classements)
+print(classement_benchmark, row.names = FALSE)
+if (!is.null(classement_benchmark)) {
+  meilleurs_modeles <- classement_benchmark[classement_benchmark$rang == 1, ]
+  print(meilleurs_modeles, row.names = FALSE)
+  write.csv(classement_benchmark, file.path(dossier_benchmark, "classement.csv"), row.names = FALSE)
+  write.csv(meilleurs_modeles, file.path(dossier_benchmark, "meilleurs_modeles.csv"), row.names = FALSE)
+}
+```
+
+## 18. Visualiser la distribution des scores
+
+Une facette par variable évite de comparer directement des erreurs exprimées
+dans des unités différentes. Ces distributions complètent le classement moyen.
+
+```{r graphique_benchmark, fig.width=14, fig.height=10}
+if (ggplot_disponible) {
+  affichage <- resultats_benchmark[resultats_benchmark$statut == "ok", ]
+  principales <- ifelse(types_benchmark[affichage$variable] == "quantitative", "RMSE", "taux_erreur")
+  affichage <- affichage[affichage$metrique == principales, ]
+  if (nrow(affichage)) {
+    print(ggplot2::ggplot(affichage, ggplot2::aes(x = modele_imputation, y = valeur)) +
+      ggplot2::geom_boxplot(outlier.shape = NA, fill = "#C8DDF0") +
+      ggplot2::geom_point(alpha = 0.25, size = 0.7) +
+      ggplot2::facet_wrap(~ variable + metrique, scales = "free_y", ncol = 3) +
+      ggplot2::labs(title = "Précision des imputations selon la variable",
+                    x = "Modèle d'imputation", y = "Erreur sur les valeurs masquées") +
+      ggplot2::theme_minimal(base_size = 11) +
+      ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 60, hjust = 1)))
+  }
+}
+```
