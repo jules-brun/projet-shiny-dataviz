@@ -1,7 +1,8 @@
 # Serveur Shiny — dépend de R/import.R et des quatre fichiers processed.
-# Packages à installer une fois : install.packages(c("shiny", "ggplot2", "DT"))
+# Packages à installer une fois : install.packages(c("shiny", "tidyverse", "VIM", "FactoMineR", "missMDA", "ggrepel"))
 library(shiny)
 library(ggplot2)
+library(tidyverse)
 
 # Chargement une fois au démarrage, dans un environnement séparé.
 # import.R peut imprimer un graphique : un périphérique temporaire sans fichier
@@ -27,22 +28,14 @@ stopifnot(all(is.na(donnees_uci$diagnostic_initial) |
 donnees_uci$diagnostic <- ifelse(is.na(donnees_uci$diagnostic_initial),
                                 NA_integer_, as.integer(donnees_uci$diagnostic_initial > 0))
 
-# Sélection des seules variables cliniques : éviter la fuite du diagnostic
-# original et ne pas inclure la provenance dans la formule diagnostic ~ .
-variables_modelisation <- import_uci$colonnes
-predicteurs <- setdiff(variables_modelisation, "diagnostic")
-cas_complets <- complete.cases(donnees_uci[variables_modelisation])
-donnees_modelisation <- donnees_uci[cas_complets, variables_modelisation]
 variables_categorielles <- c("sexe", "type_doul_thor", "glyc_jeun_elevee",
   "ecg_repos", "angine_effort", "pente_st", "test_thallium", "nb_vaisseaux")
-donnees_modelisation[variables_categorielles] <-
-  lapply(donnees_modelisation[variables_categorielles], factor)
 libelles_sources <- c(cleveland = "Cleveland", hungarian = "Hongrie",
                        switzerland = "Suisse", va = "VA Long Beach")
 
 # Référence propre au quatrième onglet, avec un identifiant de ligne source stable.
 source("R/gestion_na.R", local = TRUE)
-source("R/modelisation.R", local = TRUE)
+source("R/visualisation.R", local = TRUE)
 dictionnaire_na <- creer_dictionnaire_na(import_uci$dictionnaire, variables_categorielles)
 reference_na <- new.env(parent = emptyenv())
 reference_na$donnees <- donnees_uci
@@ -54,41 +47,31 @@ source("R/tests_absence.R", local = TRUE)
 associations_absence <- analyser_absences(reference_na$donnees, dictionnaire_na)
 
 function(input, output, session) {
-  output$indicateurs <- renderUI({
-    b <- import_uci$bilan_nettoyage
-    carte <- function(valeur, libelle) div(class = "metric", strong(valeur), span(libelle))
-    div(class = "metric-row",
-      carte(b$n_final, "observations après nettoyage"),
-      carte(length(import_uci$fichiers), "centres de provenance"),
-      carte(b$n_doublons_retires, "occurrences dupliquées retirées"),
-      carte(b$n_zeros_recodes, "zéros recodés en NA")
-    )
-  })
   output$bilan_doublons <- renderText({
     b <- import_uci$bilan_nettoyage
     paste(b$n_doublons_retires, "occurrences retirées sur", b$n_brut,
           "lignes initiales ;", b$n_final,
           "observations conservées. Une ligne par paire est gardée. Les fichiers sources sont inchangés.")
   })
-  output$journal_zeros <- DT::renderDT({
-    DT::formatRound(DT::datatable(import_uci$journal_recodage, rownames = FALSE,
-      options = list(scrollX = TRUE, dom = "t", pageLength = 8)), "pct_na_finaux", 2)
+  output$recodages_na <- renderUI({
+    journal <- import_uci$journal_recodage
+    nb_interrogations <- sum(is.na(import_uci$heart_avant_recodage[import_uci$colonnes]))
+    nb_zeros <- function(variable)
+      sum(journal$n_zeros_recodes[journal$variable == variable])
+    fluidRow(
+      column(6, div(class = "recodage",
+        h4("1 · Marqueurs manquants UCI"),
+        p(class = "regle", "? → NA"),
+        p("Les points d'interrogation des fichiers sources indiquent une valeur manquante. Ils sont convertis en NA dès l'import [1]."),
+        p(strong(nb_interrogations), "valeurs manquantes d'origine dans les observations conservées après dédoublonnage."))),
+      column(6, div(class = "recodage",
+        h4("2 · Zéros de mesures non exploitables"),
+        p(class = "regle", "pa_repos et cholesterol : 0 → NA"),
+        p("Le recodage de ces deux mesures nulles repose sur leur plausibilité clinique, éclairée par les références bibliographiques [2, 3]."),
+        p(strong(nb_zeros("pa_repos")), "valeur de pression au repos et",
+          strong(nb_zeros("cholesterol")), "valeurs de cholestérol recodées en NA.")))
+    )
   })
-  output$origine_na <- renderPlot({
-    d <- import_uci$na_origine
-    d$variable <- factor(d$variable, levels = rev(import_uci$colonnes))
-    ggplot(d, aes(x = pct, y = variable, fill = origine)) +
-      geom_col(width = .68) +
-      scale_fill_manual(values = c("NA initiaux" = "#B8D4FA", "Zéros recodés" = "#165DDE")) +
-      scale_x_continuous(limits = c(0, 100), labels = function(x) paste0(x, " %")) +
-      scale_y_discrete(labels = setNames(import_uci$dictionnaire$libelle,
-                                        import_uci$dictionnaire$nom_fr)) +
-      labs(x = "Pourcentage des observations après dédoublonnage", y = NULL, fill = NULL,
-           caption = "Les deux contributions s'additionnent. Dénominateur commun : toutes les observations nettoyées.") +
-      theme_minimal(base_size = 11) +
-      theme(legend.position = "top", panel.grid.major.y = element_blank(),
-            panel.grid.minor = element_blank())
-  }, res = 110)
   # Les données sources restent communes en lecture ; les sorties sont par session.
   updateSelectInput(session, "source_apercu", choices = c(
     "Toutes" = "toutes", setNames(names(import_uci$fichiers), names(import_uci$fichiers))
@@ -100,169 +83,87 @@ function(input, output, session) {
   })
   output$dimensions <- renderText({
     paste(nrow(apercu()), "observations —", ncol(apercu()),
-          "colonnes affichables (diagnostic original inclus).")
+          "variables disponibles (diagnostic original inclus).")
   })
-  output$apercu <- DT::renderDT({
-    req(input$n_apercu)
-    n <- max(1, min(100, as.integer(input$n_apercu)))
-    DT::datatable(head(apercu(), n), rownames = FALSE,
-                  options = list(scrollX = TRUE, pageLength = 6))
-  })
-  output$effectifs <- renderTable({
-    setNames(as.data.frame(table(apercu()$provenance)), c("Provenance", "Effectif"))
-  })
-  output$dictionnaire <- DT::renderDT({
+  updateSelectInput(session, "variable_apercu",
+    choices = setNames(import_uci$colonnes, import_uci$dictionnaire$libelle),
+    selected = "age")
+  output$apercu <- renderPlot({
+    req(input$variable_apercu %in% import_uci$colonnes)
+    variable <- input$variable_apercu
+    d <- data.frame(valeur = apercu()[[variable]])
+    d <- d[!is.na(d$valeur), , drop = FALSE]
+    validate(need(nrow(d) > 0, "Aucune valeur observée pour cette variable dans ce centre."))
+    libelle <- import_uci$dictionnaire$libelle[match(variable, import_uci$colonnes)]
+    if (variable %in% c(variables_categorielles, "diagnostic")) {
+      d$valeur <- factor(d$valeur)
+      if (variable == "diagnostic")
+        d$valeur <- factor(d$valeur, levels = c("0", "1"),
+                          labels = c("Absence", "Présence"))
+      ggplot(d, aes(valeur)) + geom_bar(fill = "#165DDE", width = .65) +
+        labs(x = libelle, y = "Observations", caption = "Valeurs manquantes exclues. Les catégories cliniques suivent les codes UCI.") +
+        theme_minimal(base_size = 12)
+    } else {
+      ggplot(d, aes(valeur)) + geom_histogram(bins = 25, fill = "#165DDE", color = "white") +
+        labs(x = libelle, y = "Observations", caption = "Valeurs manquantes exclues.") +
+        theme_minimal(base_size = 12)
+    }
+  }, res = 110)
+  output$effectifs <- renderPlot({
+    d <- as.data.frame(table(factor(apercu()$provenance, levels = names(libelles_sources))))
+    names(d) <- c("provenance", "n")
+    ggplot(d, aes(provenance, n)) + geom_col(fill = "#165DDE", width = .6) +
+      geom_text(aes(label = n), vjust = -.4) +
+      scale_x_discrete(labels = libelles_sources) +
+      scale_y_continuous(expand = expansion(mult = c(0, .15))) +
+      labs(x = NULL, y = "Observations après nettoyage") + theme_minimal(base_size = 12)
+  }, res = 110)
+  output$dictionnaire <- renderUI({
+    req(input$variable_apercu %in% import_uci$colonnes)
     d <- import_uci$dictionnaire
-    d$libelle[d$nom_fr == "diagnostic"] <- "Diagnostic binaire dans l'application ; code UCI conservé dans diagnostic_initial"
-    DT::datatable(d, rownames = FALSE, options = list(pageLength = 14, dom = "t", scrollX = TRUE))
+    i <- match(input$variable_apercu, d$nom_fr)
+    div(class = "callout", strong(d$libelle[i]),
+      p("Nom de la variable : ", code(d$nom_fr[i]), " · Code UCI : ", code(d$nom_uci[i])),
+      if (input$variable_apercu == "diagnostic")
+        p("Diagnostic binaire : 0 = absence, 1 = présence. Le code UCI original (0 à 4) est conservé dans les données."))
   })
-  output$doublons <- DT::renderDT({
-    DT::datatable(import_uci$doublons_details, rownames = FALSE,
-                  options = list(scrollX = TRUE, pageLength = 6))
+  output$doublons <- renderUI({
+    d <- import_uci$doublons_details
+    groupes <- split(d, interaction(d$provenance, d$groupe_profil, drop = TRUE))
+    tagList(lapply(groupes, function(g) {
+      retires <- g$ligne_source[import_uci$retirer[g$ligne_fusion]]
+      gardees <- g$ligne_source[!import_uci$retirer[g$ligne_fusion]]
+      div(class = "callout", strong(unname(libelles_sources[g$provenance[1]])),
+        p("Ligne source conservée : ", paste(gardees, collapse = ", "),
+          " → ligne source retirée : ", paste(retires, collapse = ", ")))
+    }))
   })
-  output$carte_na <- renderPlot({ import_uci$graphique_na_provenance() }, res = 110)
-  output$na_global_ui <- renderTable(import_uci$na_global, digits = 2)
-  output$na_sources_ui <- DT::renderDT({
-    DT::formatRound(DT::datatable(import_uci$na_sources, rownames = FALSE,
-      options = list(scrollX = TRUE, dom = "t")),
-      c("pct_cellules_na", "pct_lignes_avec_na"), 2)
-  })
-  output$na_detail <- DT::renderDT({
-    DT::formatRound(DT::datatable(import_uci$na_par_provenance, rownames = FALSE,
-      options = list(pageLength = 14, scrollX = TRUE)), "pct_na", 2)
-  })
-
-  # Garder un échantillon commun, indépendant de la variable retirée.
-  updateSelectInput(session, "variable_modele",
-    choices = setNames(predicteurs, import_uci$dictionnaire$libelle[
-      match(predicteurs, import_uci$dictionnaire$nom_fr)]),
-    selected = "nb_vaisseaux")
-  output$bilan_modelisation <- renderText({
-    paste(nrow(donnees_modelisation), "lignes complètes retenues sur",
-      nrow(donnees_uci), "lignes nettoyées ;", sum(!cas_complets),
-      "lignes exclues pour au moins une valeur manquante. Aucune imputation.")
-  })
-  output$effectifs_modelisation <- renderTable({
-    sources <- names(import_uci$fichiers)
-    disponibles <- as.integer(table(factor(donnees_uci$provenance, levels = sources)))
-    retenues <- as.integer(table(factor(donnees_uci$provenance[cas_complets], levels = sources)))
-    data.frame(Provenance = unname(libelles_sources[sources]),
-      "Lignes nettoyées" = disponibles, "Lignes retenues" = retenues,
-      "Lignes exclues (NA)" = disponibles - retenues, check.names = FALSE)
-  })
-  formule_reduite <- reactive({
-    req(input$variable_modele %in% predicteurs)
-    reformulate(setdiff(predicteurs, input$variable_modele), response = "diagnostic")
-  })
-  output$formules_modeles <- renderText({
-    paste("Modèle complet : diagnostic ~ .",
-      paste("Modèle réduit :", paste(deparse(formule_reduite()), collapse = " ")),
-      sep = "\n")
-  })
-
-  # L'ANOVA de modèles emboîtés utilise les mêmes cas complets et la loi binomiale.
-  modeles <- reactive({
-    req(input$variable_modele %in% predicteurs)
-    tryCatch({
-      d <- donnees_modelisation
-      if (length(unique(d$diagnostic)) != 2)
-        stop("Les deux diagnostics doivent être représentés.")
-      if (any(vapply(d[variables_categorielles], nlevels, integer(1)) < 2))
-        stop("Une variable catégorielle n'a qu'une modalité observée.")
-      avertissements <- character()
-      resultat <- withCallingHandlers({
-        entier <- glm(diagnostic ~ ., family = binomial(), data = d, na.action = na.fail)
-        reduit <- glm(formule_reduite(), family = binomial(), data = d, na.action = na.fail)
-        if (!reduit$converged || !entier$converged ||
-            anyNA(coef(reduit)) || anyNA(coef(entier)))
-          stop("Ajustement instable ou coefficients non identifiables : examiner les catégories et les effectifs.")
-        if (entier$df.residual <= 0 || reduit$df.residual - entier$df.residual <= 0)
-          stop("Effectif ou degrés de liberté insuffisants pour comparer les modèles.")
-        comparaison <- anova(reduit, entier, test = "LRT")
-        texte <- capture.output({
-          cat("Variable évaluée :", input$variable_modele, "\n")
-          cat("Cas complets utilisés dans chaque modèle :", nrow(d), "\n")
-          cat("Diagnostics absents :", sum(d$diagnostic == 0),
-              "— diagnostics présents :", sum(d$diagnostic == 1), "\n\n")
-          cat("ANOVA — test du rapport de vraisemblance :\n")
-          # Traduire les colonnes affichées du tableau produit par anova().
-          tableau <- data.frame(
-            Modèle = c("Réduit", "Complet"),
-            "DDL résiduels" = comparaison[[1]],
-            "Déviance résiduelle" = comparaison[[2]],
-            "Écart de DDL" = comparaison[[3]],
-            "Écart de déviance" = comparaison[[4]],
-            "Valeur p" = comparaison[[5]], check.names = FALSE)
-          print(tableau, row.names = FALSE)
-          cat("\nAIC (compromis entre ajustement et complexité ; plus faible = meilleur) :\n")
-          print(data.frame(Modèle = c("Réduit", "Complet"),
-                           AIC = c(AIC(reduit), AIC(entier))), row.names = FALSE)
-        })
-        # Interprétation de l'apport conditionnel de la variable et du choix par AIC.
-        libelle <- import_uci$dictionnaire$libelle[
-          match(input$variable_modele, import_uci$dictionnaire$nom_fr)]
-        valeur_p <- comparaison[[5]][2]
-        ecart_aic <- AIC(reduit) - AIC(entier)
-        conclusion_anova <- if (!is.finite(valeur_p)) {
-          "L'ANOVA ne permet pas de conclure : la valeur p n'est pas disponible."
-        } else if (valeur_p < .05) {
-          paste0("L'ANOVA montre que la variable « ", libelle,
-            " » apporte une information statistiquement significative au seuil de 5 % pour expliquer la présence de maladie cardiaque, en tenant compte des autres variables (p = ",
-            format.pval(valeur_p, digits = 3, eps = .001), ").")
-        } else {
-          paste0("L'ANOVA ne met pas en évidence d'apport statistiquement significatif de la variable « ",
-            libelle, " » au seuil de 5 %, en tenant compte des autres variables (p = ",
-            format.pval(valeur_p, digits = 3, eps = .001),
-            "). Ce résultat ne prouve pas l'absence d'association.")
-        }
-        conclusion_aic <- if (abs(ecart_aic) < 1e-8) {
-          "Les deux modèles ont le même AIC : ce critère ne les départage pas."
-        } else {
-          paste0("Parmi ces deux modèles, l'AIC privilégie le modèle ",
-            if (ecart_aic > 0) "complet, qui conserve" else "réduit, qui retire",
-            " la variable « ", libelle, " » (AIC réduit = ",
-            sprintf("%.2f", AIC(reduit)), ", AIC complet = ",
-            sprintf("%.2f", AIC(entier)), "; écart = ",
-            sprintf("%.2f", abs(ecart_aic)), ").",
-            if (abs(ecart_aic) < 2) " L'écart inférieur à 2 indique que les deux modèles restent proches selon ce critère." else "")
-        }
-        list(texte = texte, conclusion = c(conclusion_anova, conclusion_aic), graphique = data.frame(
-          Modèle = factor(c("Réduit", "Complet"), levels = c("Réduit", "Complet")),
-          Déviance = c(deviance(reduit), deviance(entier))))
-      }, warning = function(w) {
-        avertissements <<- c(avertissements, conditionMessage(w))
-        invokeRestart("muffleWarning")
-      })
-      if (length(avertissements)) {
-        # Les messages natifs de R peuvent dépendre de la langue de la session.
-        resultat$conclusion <- c("L'ajustement a produit un avertissement : les conclusions suivantes doivent être interprétées avec prudence.",
-                                  resultat$conclusion)
-        resultat$texte <- c("AVERTISSEMENT : R signale un ajustement potentiellement instable (convergence ou probabilités extrêmes). Interprétation à vérifier.",
-                            "", resultat$texte)
-      }
-      resultat$texte <- paste(resultat$texte, collapse = "\n")
-      resultat
-    }, error = function(e) list(texte = paste("Modélisation non disponible :", conditionMessage(e)),
-                                graphique = NULL))
-  })
-  output$resultat_modeles <- renderText(modeles()$texte)
-  output$conclusion_modeles <- renderUI({
-    resultat <- modeles()
-    if (is.null(resultat$conclusion)) return(p(resultat$texte))
-    tagList(lapply(resultat$conclusion, p))
-  })
-  output$comparaison_modeles <- renderPlot({
-    resultat <- modeles()
-    validate(need(!is.null(resultat$graphique), "Graphique indisponible : consulter le résultat ci-dessus."))
-    ggplot(resultat$graphique, aes(Modèle, Déviance, fill = Modèle)) +
-      geom_col(width = .5, show.legend = FALSE) +
-      geom_text(aes(label = sprintf("%.2f", Déviance)), vjust = -.5) +
-      scale_fill_manual(values = c("Réduit" = "#B8D4FA", "Complet" = "#165DDE")) +
-      scale_y_continuous(expand = expansion(mult = c(0, .12))) +
-      labs(title = paste("Apport de la variable", input$variable_modele),
-           x = NULL, y = "Déviance résiduelle") +
+  output$combinaisons_na <- renderPlot({
+    validate(need(requireNamespace("VIM", quietly = TRUE),
+      'Installer VIM pour afficher ce graphique : install.packages("VIM")'))
+    ancien_par <- par(las = 2)
+    on.exit(par(ancien_par))
+    VIM::aggr(donnees_uci[import_uci$colonnes],
+      col = c("#B8D4FA", "#E88432"),
+      only.miss = TRUE, sortVars = TRUE, sortCombs = TRUE,
+      numbers = FALSE, prop = TRUE, cex.axis = .75,
+      ylabs = c("Proportion de NA", "Fréquence des combinaisons"))
+  }, res = 110)
+  output$na_global_ui <- renderPlot({
+    d <- data.frame(nb_na = rowSums(is.na(donnees_uci[import_uci$colonnes])))
+    ggplot(d, aes(nb_na)) + geom_bar(fill = "#165DDE", width = .7) +
+      scale_x_continuous(breaks = 0:length(import_uci$colonnes)) +
+      labs(x = "Nombre de mesures manquantes sur 14", y = "Observations",
+           caption = "Toutes les observations nettoyées sont incluses, y compris celles sans NA.") +
       theme_minimal(base_size = 12)
   }, res = 110)
+  output$na_detail <- renderPlot({ import_uci$graphique_na_provenance() }, res = 110)
+
+  libelles <- setNames(import_uci$dictionnaire$libelle, import_uci$colonnes)
+  parcours_serveur("complets", donnees_uci, import_uci$colonnes,
+    variables_categorielles, libelles, libelles_sources)
+  parcours_serveur("imputes", donnees_uci, import_uci$colonnes,
+    variables_categorielles, libelles, libelles_sources, imputation = TRUE)
   serveur_tests_absence(input, output, session, associations_absence,
                         dictionnaire_na, libelles_sources)
 

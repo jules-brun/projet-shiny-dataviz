@@ -3,8 +3,17 @@ SHINY — HEART DISEASE, VERSION NETTOYÉE
 Conserver ui.R, server.R et le dossier R/ ensemble.
 Garder dataset/ à la racine avec les quatre fichiers processed fournis.
 Depuis une session R ouverte à la racine :
-install.packages(c("shiny", "ggplot2", "DT"))
+install.packages(c("shiny", "tidyverse", "VIM", "FactoMineR", "missMDA", "ggrepel"))
 shiny::runApp(".")
+
+Conserver R/_disable_autoload.R : ce fichier désactive le chargement automatique
+des scripts par Shiny. server.R gère les imports dans leurs environnements dédiés.
+
+L'interface ne présente aucun tableau : distributions des variables et effectifs
+par centre dans le premier onglet ; heatmap, combinaisons et nombre de NA
+dans le deuxième ; deux parcours exploratoires (cas complets et imputation
+factorielle) dans le troisième. Les définitions et décisions de dédoublonnage
+sont décrites en texte. La matrice graphique des associations reste dans le quatrième onglet.
 
 NETTOYAGE
 - Comparer les 14 variables originales avant tout recodage.
@@ -12,9 +21,9 @@ NETTOYAGE
 - Deux occurrences retirées : une en Hongrie, une à VA Long Beach.
 - 920 lignes initiales, 918 après dédoublonnage.
 - Zéros de cholesterol et pa_repos transformés en NA : 172 + 1 cellules.
-- Les autres zéros ne sont pas transformés. La référence et les trois premiers
-  onglets restent sans imputation. Le quatrième est désormais descriptif :
-  il n'applique aucun traitement supplémentaire.
+- Les autres zéros ne sont pas transformés. La référence reste sans imputation.
+  Seul le second parcours du troisième onglet utilise une copie imputée.
+  Le quatrième onglet conserve les absences de la référence nettoyée.
 - Les fichiers sources restent inchangés.
 - heart_brut, heart_avant_recodage, doublons_supprimes et journal_recodage
   permettent de retrouver les transformations dans R/import.R.
@@ -38,7 +47,7 @@ MATRICE DES ASSOCIATIONS AVEC L'ABSENCE — QUATRIÈME ONGLET
 Le quatrième onglet affiche la matrice croisée, sa légende et une conclusion
 calculée selon les associations détectées après correction BH.
 Les textes narratifs, fiches, tableaux détaillés, sélecteurs et autres graphiques
-ont été retirés de l'interface. Les trois premiers onglets restent inchangés.
+ont été retirés de cet onglet.
 
 R/tests_absence.R définit explicitement les neuf variables dont l'absence est testée :
 pa_repos, cholesterol, glyc_jeun_elevee, fc_max, angine_effort, depress_st,
@@ -83,10 +92,30 @@ Ou Rscript tests/validation_na.R
 Contrôles : neuf lignes autorisées, exclusion de la ligne ECG, tableaux manuels,
 cas limites, petits effectifs, quantiles dupliqués, NA de Y, simulations reproductibles,
 correction BH uniquement sur les tests valides, sources inchangées, rendu de la matrice
-et maintien des modèles existants. Les anciens calculs narratifs peuvent être testés
+et cohérence des parcours descriptifs. Les anciens calculs narratifs peuvent être testés
 séparément avec Rscript tests/validation_comprendre_na.R.
 
 Documentation des tests :
 https://stat.ethz.ch/R-manual/R-devel/library/stats/html/chisq.test.html
 https://stat.ethz.ch/R-manual/R-devel/library/stats/html/fisher.test.html
 https://stat.ethz.ch/R-manual/R-devel/library/stats/html/p.adjust.html
+
+VISUALISATION DES RELATIONS — TROISIÈME ONGLET
+Deux parcours partagent les distributions par diagnostic, les proportions des
+modalités, les corrélations de Spearman, un nuage de points paramétrable et une
+ACM des catégories avec diagnostic et provenance supplémentaires.
+Le premier supprime les lignes incomplètes sur les 14 variables cliniques.
+Le second utilise une imputation régularisée missMDA : AFDM pour données mixtes
+par défaut, ou ACP standardisée des mesures numériques + ACM des catégories.
+Les codes catégoriels ne sont jamais traités comme des mesures continues.
+Diagnostic, provenance et identifiants sont exclus de la reconstruction.
+Seules les cellules manquantes sont remplacées. Les diagnostics absents sont
+exclus plutôt qu'imputés. Deux dimensions par défaut, réglables de 1 à 4 ;
+aucun rang optimal n'est revendiqué. L'imputation unique ne quantifie pas son
+incertitude. Les deux ACM sont calculées séparément et leurs axes ne sont
+pas directement alignés.
+Documentation :
+https://search.r-project.org/CRAN/refmans/missMDA/html/imputeFAMD.html
+https://search.r-project.org/CRAN/refmans/missMDA/html/imputePCA.html
+https://search.r-project.org/CRAN/refmans/missMDA/html/imputeMCA.html
+Validation : Rscript tests/validation_visualisation.R

@@ -1,5 +1,6 @@
 # Interface Shiny — lancer depuis la racine avec shiny::runApp(".")
 library(shiny)
+source("R/visualisation.R", local = TRUE)
 
 fluidPage(
   tags$head(tags$style(HTML("
@@ -11,63 +12,51 @@ fluidPage(
     h1 { font-size:38px; font-weight:700; letter-spacing:-1.2px; margin:10px 0; line-height:1.2; }
     h4 { font-size:19px; font-weight:650; margin:30px 0 14px; }
     .hero p,.note { color:var(--muted); }
-    .metric-row { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:30px; }
-    .metric { padding:20px 24px; border:1px solid var(--line); background:#FFF; border-radius:16px; }
-    .metric strong { display:block; font-size:30px; font-weight:650; color:var(--blue); letter-spacing:-.7px; }
-    .metric span { color:var(--muted); font-size:13px; }
     .nav-tabs { border:0; gap:6px; display:flex; flex-wrap:wrap; margin-bottom:16px; }
     .nav-tabs>li>a { border:0!important; border-radius:10px; color:var(--muted); padding:12px 22px; font-weight:600; }
     .nav-tabs>li.active>a,.nav-tabs>li.active>a:focus,.nav-tabs>li.active>a:hover { background:var(--blue); color:white; }
     .nav-tabs>li>a:hover { background:#E8F0FE; color:var(--blue); }
     .tab-content { background:#FFF; border:1px solid var(--line); border-radius:20px; padding:28px; box-shadow:0 5px 25px #173b6610; }
     .callout { background:#EFF5FF; border-left:3px solid var(--blue); padding:16px 20px; border-radius:0 10px 10px 0; margin:16px 0; }
+    .recodage { background:#EFF5FF; border:1px solid #B8D4FA; border-top:4px solid var(--blue); border-radius:12px; padding:20px; margin-bottom:16px; }
+    .recodage h4 { margin:0 0 12px; }
+    .recodage .regle { color:var(--blue); font-size:24px; font-weight:700; }
     .form-control,.selectize-input { border-color:var(--line); border-radius:9px; box-shadow:none; }
     .btn-primary { background:var(--blue); border:0; border-radius:10px; padding:12px 20px; font-weight:600; }
     a { color:var(--blue); } a:focus,button:focus { outline:2px solid #3987FF; outline-offset:3px; }
-    .table>thead>tr>th { color:#426383; background:#F3F7FD; border-bottom:1px solid var(--line); }
-    .table>tbody>tr>td { border-top:1px solid #EDF2F8; }
     pre { background:#F4F8FE; border:1px solid var(--line); border-radius:12px; padding:18px; }
     details { margin:20px 0; padding:18px; border:1px solid var(--line); border-radius:12px; }
     summary { cursor:pointer; color:var(--blue); font-weight:600; }
     .recit-matrice { overflow-x:auto; margin:16px 0; }
     .footer { color:var(--muted); font-size:12px; padding:24px 0; }
     .shiny-plot-output { margin:20px 0; }
-    @media(max-width:767px) { .container-fluid { padding:16px; } h1 { font-size:28px; } .metric-row { grid-template-columns:repeat(2,1fr); gap:10px; } .metric { padding:14px; } .tab-content { padding:16px; } .nav-tabs>li>a { padding:10px 12px; } }
+    @media(max-width:767px) { .container-fluid { padding:16px; } h1 { font-size:28px; } .tab-content { padding:16px; } .nav-tabs>li>a { padding:10px 12px; } }
   "))),
   div(class = "hero",
     div(class = "eyebrow", "UCI HEART DISEASE / EXPLORATION"),
     h1("Diagnostic cardiaque et prédiction"),
-    p("Quelles variables cliniques permettent d’expliquer la présence d’une maladie cardiaque, et dans quelle mesure peut-on la prédire ? Cette étude s’appuie sur le jeu de données Heart Disease du dépôt UCI, issu de quatre centres : Cleveland, la Hongrie, la Suisse et le VA Medical Center de Long Beach.")
+    p("Analyse des variables cliniques associées à la présence d’une maladie cardiaque et de leur apport à la prédiction. Cette étude s’appuie sur le jeu de données Heart Disease du dépôt UCI, issu de quatre centres : Cleveland, la Hongrie, la Suisse et le VA Medical Center de Long Beach.")
   ),
   tabsetPanel(
     tabPanel("1 · Données",
-      uiOutput("indicateurs"),
-      fluidRow(
-        column(3,
-          selectInput("source_apercu", "Provenance", choices = c("Toutes" = "toutes")),
-          numericInput("n_apercu", "Nombre de premières lignes", 6, min = 1, max = 100),
-          helpText("Ce filtre concerne uniquement cet onglet. Le diagnostic original et sa version binaire sont conservés.")
-        ),
-        column(9,
-          h4("Aperçu du tableau fusionné"), textOutput("dimensions"),
-          DT::DTOutput("apercu"),
-          h4("Effectifs par provenance"), tableOutput("effectifs")
-        )
-      ),
-      h4("Dictionnaire des variables"), DT::DTOutput("dictionnaire"),
+      selectInput("source_apercu", "Provenance", choices = c("Toutes" = "toutes")),
+      helpText("Ce filtre concerne uniquement cet onglet."),
+      h4("Effectifs par provenance"), plotOutput("effectifs", height = "300px"),
+      h4("Distribution des variables cliniques"),
+      selectInput("variable_apercu", "Variable", choices = NULL),
+      uiOutput("dictionnaire"), textOutput("dimensions"),
+      plotOutput("apercu", height = "380px"),
       h4("Doublons : une occurrence conservée par paire"),
       div(class = "callout", textOutput("bilan_doublons")),
       p("Comparaison des 14 variables originales au sein de chaque provenance, avant recodage des zéros. La première occurrence est conservée. Les NA aux mêmes positions comptent comme identiques. Ce choix de dédoublonnage ne constitue pas une preuve d'identité du patient."),
-      p(class = "note", "Le tableau ci-dessous conserve la trace des lignes d'origine et indique la décision pour chacune."),
-      DT::DTOutput("doublons")
+      uiOutput("doublons")
     ),
     tabPanel("2 · Valeurs manquantes",
-      div(class = "callout",
-        p(strong("Deux recodages ciblés : "), "cholesterol = 0 et pa_repos = 0 deviennent NA."),
-        p("La carte et les tableaux incluent ces nouveaux NA après retrait des occurrences dupliquées. Les pourcentages utilisent l'effectif nettoyé de chaque centre.")
-      ),
+      h4("Deux étapes pour identifier les valeurs manquantes"),
+      uiOutput("recodages_na"),
+      p(class = "note", "Seuls les zéros de pression au repos et de cholestérol sont recodés ; les autres zéros sont conservés. Les graphiques portent sur les données après dédoublonnage et recodage, sans imputation."),
       tags$details(
-        tags$summary("Pourquoi ces zéros sont-ils traités comme manquants ?"),
+        tags$summary("Justification bibliographique du recodage des zéros"),
         tags$ul(
           tags$li(strong("Cholestérol total (cholesterol, mg/dL). "),
                   "Le cholestérol est une substance produite par l'organisme et transportée dans le sang [2]. Une valeur exactement nulle est retenue comme non exploitable dans cette cohorte et recodée en NA."),
@@ -87,38 +76,22 @@ fluidPage(
             tags$a("Low Blood Pressure.", href = "https://www.nhlbi.nih.gov/health/low-blood-pressure", target = "_blank", rel = "noopener noreferrer"), " Consulté le 3 octobre 2026.")
         )
       ),
-      h4("Traçabilité des zéros recodés"), DT::DTOutput("journal_zeros"),
-      plotOutput("carte_na", height = "630px"),
-      fluidRow(
-        column(6, h4("Toutes provenances réunies, après nettoyage"), tableOutput("na_global_ui")),
-        column(6, h4("Bilan par provenance"), DT::DTOutput("na_sources_ui"))
-      ),
-      h4("Origine des valeurs manquantes"),
-      plotOutput("origine_na", height = "500px"),
-      h4("Détail par variable et provenance"), DT::DTOutput("na_detail")
+      h4("Pourcentage de NA par variable et provenance"),
+      p("Chaque case indique la proportion de valeurs manquantes pour une variable dans un centre, après conversion des ? et recodage des zéros ciblés. Le dénominateur est l'effectif nettoyé de ce centre."),
+      plotOutput("na_detail", height = "630px"),
+      h4("Combinaisons de valeurs manquantes"),
+      p("À gauche, les barres indiquent la proportion de NA par variable. À droite, chaque ligne représente une combinaison de valeurs observées (bleu) et manquantes (orange) ; la barre associée indique sa fréquence."),
+      plotOutput("combinaisons_na", height = "760px"),
+      p(class = "note", "Les variables sont triées selon leur proportion de NA. Les combinaisons affichées comportent au moins une valeur manquante ; leurs fréquences sont calculées sur toutes les observations nettoyées. La provenance est exclue de ce graphique."),
+      h4("Nombre de mesures manquantes par observation"),
+      plotOutput("na_global_ui", height = "330px")
     ),
-    tabPanel("3 · Modélisation",
-      p("Évaluer l'apport d'une variable au diagnostic en comparant deux régressions logistiques."),
-      p(class = "note", "Diagnostic binaire : 0 = absence et 1 = présence selon le critère UCI. Le code 0 ne signifie pas l'absence de tout problème cardiaque."),
-      selectInput("variable_modele", "Variable dont on souhaite évaluer l'apport", choices = NULL),
-      div(class = "callout",
-        p(strong("Aucune imputation. "), "Les quatre centres sont réunis après dédoublonnage et recodage des zéros ciblés. Seules les lignes sans NA sur le diagnostic et les 13 variables explicatives sont retenues."),
-        p("Les deux modèles sont ajustés sur exactement les mêmes lignes, y compris lorsque la variable choisie est retirée du modèle réduit. La provenance et le diagnostic original ne sont pas des variables explicatives.")
-      ),
-      h4("Composition du jeu de données utilisé"),
-      textOutput("bilan_modelisation"),
-      tableOutput("effectifs_modelisation"),
-      h4("Modèles comparés"),
-      p("Modèle complet : diagnostic ~ . sur les 13 variables cliniques. Modèle réduit : toutes ces variables sauf celle choisie."),
-      p("Les variables catégorielles, y compris le nombre de vaisseaux, sont traitées comme des facteurs. Les variables continues ont un effet linéaire sur le logit. Aucun terme d'interaction n'est ajouté."),
-      verbatimTextOutput("formules_modeles"),
-      h4("Comparaison par ANOVA"),
-      p("La comparaison est recalculée à chaque changement de variable. Le test du rapport de vraisemblance compare le modèle réduit au modèle complet."),
-      verbatimTextOutput("resultat_modeles"),
-      plotOutput("comparaison_modeles", height = "330px"),
-      h4("Conclusion de la comparaison"),
-      div(class = "callout", uiOutput("conclusion_modeles")),
-      p(class = "note", "Une faible valeur p indique que la variable améliore l'ajustement du modèle en présence des autres variables. Le graphique montre la déviance résiduelle : plus elle est faible, meilleur est l'ajustement aux données utilisées. Cela ne démontre ni causalité ni gain prédictif hors échantillon. Les modèles restent exploratoires.")
+    tabPanel("3 · Relations entre variables",
+      p("Deux parcours de visualisation pour comparer les relations cliniques avec et sans imputation des valeurs manquantes."),
+      tabsetPanel(
+        tabPanel("Cas complets", parcours_ui("complets")),
+        tabPanel("Imputation par composantes", parcours_ui("imputes", imputation = TRUE))
+      )
     ),
     tabPanel("4 · Comprendre les données manquantes",
       div(class = "recit-matrice",

@@ -14,7 +14,7 @@ sources <- names(libelles_sources)
 variables <- dictionnaire_na$nom_fr
 bilan <- bilan_population_complete(reference, c(variables, "diagnostic"), sources)
 stopifnot(sum(bilan$n_initial) == nrow(reference),
-  sum(bilan$n_complet) == nrow(donnees_modelisation),
+  sum(bilan$n_complet) == sum(complete.cases(donnees_uci[import_uci$colonnes])),
   all(bilan$n_initial == bilan$n_complet + bilan$n_exclus),
   isTRUE(all.equal(sum(bilan$pct_population_initiale), 100)),
   isTRUE(all.equal(sum(bilan$pct_population_complete), 100)))
@@ -84,13 +84,11 @@ stopifnot(all(is.na(bilan_vide$pct_na[bilan_vide$n == 0])),
 html <- as.character(interface)
 stopifnot(grepl("Comprendre les données manquantes", html),
   !grepl("na_trait_|na_calcul|na_portee_knn|na_export_", html),
-  grepl("1 · Données", html), grepl("2 · Valeurs manquantes", html), grepl("3 · Modélisation", html))
+  grepl("1 · Données", html), grepl("2 · Valeurs manquantes", html), grepl("3 · Relations entre variables", html))
 shiny::testServer(serveur, {
-  session$setInputs(source_apercu = "toutes", n_apercu = 6, variable_modele = "cholesterol", recit_variable = "cholesterol")
-  for (nom in c("indicateurs", "apercu", "effectifs", "dictionnaire", "doublons", "journal_zeros",
-    "carte_na", "na_global_ui", "na_sources_ui", "na_detail", "origine_na", "bilan_modelisation",
-    "effectifs_modelisation", "formules_modeles", "comparaison_modeles", "conclusion_modeles")) invisible(output[[nom]])
-  stopifnot(grepl("ANOVA", output$resultat_modeles))
+  session$setInputs(source_apercu = "toutes", variable_apercu = "age", recit_variable = "cholesterol")
+  for (nom in c("apercu", "effectifs", "dictionnaire", "doublons", "recodages_na",
+    "combinaisons_na", "na_global_ui", "na_detail")) invisible(output[[nom]])
   invisible(output$absence_matrice)
 })
 stopifnot(identical(reference, original), identical(reference_na$donnees, original),

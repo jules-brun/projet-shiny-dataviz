@@ -99,9 +99,7 @@ html <- as.character(interface)
 stopifnot(grepl('absence_matrice', html),
   !grepl('recit_variable|recit_nettoyage|absence_details|absence_x|absence_syntheses', html))
 shiny::testServer(serveur, {
-  session$setInputs(variable_modele = "cholesterol")
   invisible(output$absence_matrice)
-  stopifnot(grepl("ANOVA", output$resultat_modeles))
 })
 stopifnot(identical(original, reference_na$donnees),
   identical(empreintes, tools::md5sum(file.path("dataset", unname(import_uci$fichiers)))))

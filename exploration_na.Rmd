@@ -1,0 +1,295 @@
+---
+title: "Heart Disease — exploration des valeurs manquantes"
+output:
+  html_notebook:
+    toc: true
+    toc_depth: 2
+lang: fr
+---
+
+Exécuter les cellules dans l'ordre depuis la racine du projet. Les quatre
+fichiers `processed` sont conservés intégralement : aucune suppression de
+lignes ni imputation. Chaque étape correspond à une cellule de code.
+
+## 0. Préparer les packages
+
+Si nécessaire, exécuter dans la console
+`install.packages(c("VIM", "FactoMineR", "ggplot2"))`.
+VIM fournit les diagnostics graphiques ; FactoMineR réalise l'ACM des
+indicateurs de présence et d'absence.
+
+```{r preparation}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 11, fig.height = 7)
+vim_disponible <- requireNamespace("VIM", quietly = TRUE)
+acm_disponible <- requireNamespace("FactoMineR", quietly = TRUE)
+ggplot_disponible <- requireNamespace("ggplot2", quietly = TRUE)
+if (!vim_disponible) message('Installer VIM : install.packages("VIM")')
+if (!acm_disponible) message('Installer FactoMineR : install.packages("FactoMineR")')
+if (!ggplot_disponible) message('Installer ggplot2 : install.packages("ggplot2")')
+```
+
+## 1. Importer les quatre datasets processed
+
+Les noms des variables reprennent ceux de `R/import.R`. L'import en caractères
+préserve volontairement les `?` pour les transformer dans une cellule dédiée.
+
+```{r importation}
+fichiers <- c(
+  cleveland = "processed.cleveland.data",
+  hungarian = "processed.hungarian.data",
+  switzerland = "processed.switzerland.data",
+  va = "processed.va.data"
+)
+variables <- c(
+  "age", "sexe", "type_doul_thor", "pa_repos", "cholesterol",
+  "glyc_jeun_elevee", "ecg_repos", "fc_max", "angine_effort",
+  "depress_st", "pente_st", "nb_vaisseaux", "test_thallium", "diagnostic"
+)
+chemins <- file.path("dataset", fichiers)
+if (!all(file.exists(chemins))) {
+  stop("Fichiers introuvables : ", paste(chemins[!file.exists(chemins)], collapse = ", "),
+       ". Ouvrir le projet à sa racine.")
+}
+datasets <- setNames(lapply(chemins, function(chemin) {
+  d <- read.table(
+    chemin, header = FALSE, sep = ",", colClasses = "character",
+    na.strings = character(0), strip.white = TRUE,
+    comment.char = "", quote = "", fill = FALSE
+  )
+  stopifnot(ncol(d) == length(variables))
+  names(d) <- variables
+  d
+}), names(fichiers))
+print(data.frame(provenance = names(datasets), n = vapply(datasets, nrow, integer(1))),
+      row.names = FALSE)
+```
+
+## 2. Fusionner et créer la variable provenance
+
+```{r fusion}
+don <- do.call(rbind, lapply(names(datasets), function(site) {
+  d <- datasets[[site]]
+  d$provenance <- site
+  d
+}))
+rownames(don) <- NULL
+don$provenance <- factor(don$provenance, levels = names(fichiers))
+print(dim(don))
+print(table(don$provenance))
+```
+
+## 3. Afficher head et summary avant nettoyage
+
+Les mesures sont encore des chaînes de caractères ; un second résumé numérique
+sera affiché après le remplacement des `?`.
+
+```{r apercu}
+print(head(don))
+print(summary(don))
+```
+
+## 4. Transformer les ? en NA et convertir les mesures en numérique
+
+```{r remplacer_points_interrogation}
+n_interrogations <- vapply(don[variables], function(x) sum(x == "?"), integer(1))
+for (variable in variables) {
+  x <- don[[variable]]
+  x[x == "?"] <- NA_character_
+  valeurs <- as.numeric(x)
+  if (any(!is.na(x) & is.na(valeurs))) {
+    stop("Valeur non numérique inattendue dans ", variable)
+  }
+  don[[variable]] <- valeurs
+}
+print(data.frame(variable = variables, n_recodes = unname(n_interrogations)),
+      row.names = FALSE)
+print(summary(don))
+```
+
+## 5. Transformer les zéros aberrants en NA
+
+Règle analytique reprise de `R/import.R` : les zéros de `pa_repos` et
+`cholesterol` sont considérés comme des mesures indisponibles. Les zéros des
+autres variables sont conservés, notamment pour les catégories et le diagnostic.
+
+```{r remplacer_zeros}
+variables_zero_na <- c("pa_repos", "cholesterol")
+recodage_zeros <- do.call(rbind, lapply(levels(don$provenance), function(site) {
+  d <- don[don$provenance == site, variables_zero_na, drop = FALSE]
+  data.frame(
+    provenance = site, variable = variables_zero_na,
+    n_zeros_recodes = unname(vapply(d, function(x) sum(x == 0, na.rm = TRUE), integer(1)))
+  )
+}))
+for (variable in variables_zero_na) {
+  don[[variable]][!is.na(don[[variable]]) & don[[variable]] == 0] <- NA_real_
+}
+print(recodage_zeros, row.names = FALSE)
+```
+
+## 6. Pourcentage de NA par variable et provenance
+
+Le dénominateur est le nombre d'observations du site concerné.
+
+```{r pourcentages_na}
+na_par_provenance <- do.call(rbind, lapply(levels(don$provenance), function(site) {
+  d <- don[don$provenance == site, variables, drop = FALSE]
+  n_na <- colSums(is.na(d))
+  data.frame(
+    provenance = site, variable = variables, n_observations = nrow(d),
+    n_na = unname(n_na), pct_na = round(100 * unname(n_na) / nrow(d), 2)
+  )
+}))
+print(na_par_provenance, row.names = FALSE)
+if (ggplot_disponible) {
+  donnees_heatmap <- na_par_provenance
+  donnees_heatmap$provenance <- factor(donnees_heatmap$provenance,
+                                      levels = names(fichiers))
+  donnees_heatmap$variable <- factor(donnees_heatmap$variable,
+                                    levels = rev(variables))
+  heatmap_na <- ggplot2::ggplot(
+    donnees_heatmap, ggplot2::aes(x = provenance, y = variable, fill = pct_na)
+  ) +
+    ggplot2::geom_tile(color = "white", linewidth = 0.5) +
+    ggplot2::geom_text(
+      ggplot2::aes(label = sprintf("%.1f %%", pct_na), color = pct_na >= 50),
+      size = 3.5
+    ) +
+    ggplot2::scale_color_manual(values = c("FALSE" = "#222222", "TRUE" = "white"),
+                                guide = "none") +
+    ggplot2::scale_fill_gradient(low = "#F1F5FA", high = "#10346A",
+                                 limits = c(0, 100), name = "% de NA") +
+    ggplot2::scale_x_discrete(labels = c(cleveland = "Cleveland", hungarian = "Hongrie",
+                                        switzerland = "Suisse", va = "VA Long Beach")) +
+    ggplot2::labs(title = "Pourcentage de valeurs manquantes par site",
+                  subtitle = "Après remplacement des ? et recodage ciblé des zéros",
+                  x = "Provenance", y = NULL) +
+    ggplot2::theme_minimal(base_size = 12) +
+    ggplot2::theme(panel.grid = ggplot2::element_blank())
+  print(heatmap_na)
+} else {
+  message("Heatmap indisponible : installer ggplot2.")
+}
+```
+
+## 7. Résumer les combinaisons de NA avec VIM
+
+La provenance est exclue des diagnostics de mesures manquantes.
+
+```{r combinaisons_na}
+if (vim_disponible) {
+  combinaisons_na <- VIM::aggr(don[variables], plot = FALSE)
+  print(summary(combinaisons_na))
+} else {
+  message("Résumé VIM indisponible : installer VIM puis relancer cette cellule.")
+}
+```
+
+## 8. Afficher aggr
+
+L'argument documenté de tri est `sortVars = TRUE`.
+[Documentation VIM](https://statistikat.github.io/VIM/reference/aggr.html).
+
+```{r graphique_aggr, fig.width=14, fig.height=8}
+if (vim_disponible) {
+  VIM::aggr(don[variables], only.miss = TRUE, sortVars = TRUE,
+            numbers = TRUE, cex.axis = 0.7)
+} else {
+  message("Graphique aggr indisponible : installer VIM.")
+}
+```
+
+## 9. Afficher matrixplot
+
+Le mode interactif est désactivé pour permettre le rendu du notebook.
+
+```{r graphique_matrixplot, fig.width=14, fig.height=8}
+if (vim_disponible) {
+  VIM::matrixplot(don[variables], sortby = "cholesterol", interactive = FALSE,
+                  main = "Valeurs observées et manquantes", cex.axis = 0.7)
+} else {
+  message("Matrixplot indisponible : installer VIM.")
+}
+```
+
+## 10. Afficher marginplot
+
+Le graphique examine la pression au repos et le cholestérol : le nuage des
+observations complètes et les distributions marginales éclairent leurs absences.
+
+```{r graphique_marginplot}
+paire <- c("pa_repos", "cholesterol")
+if (vim_disponible && all(colSums(!is.na(don[paire])) >= 2)) {
+  VIM::marginplot(don[paire],
+                  xlab = "Pression au repos (mmHg)",
+                  ylab = "Cholestérol (mg/dL)")
+} else {
+  message("Marginplot indisponible : VIM absent ou trop peu de valeurs observées.")
+}
+```
+
+## 11. Créer la matrice de présence-absence
+
+Convention : **1 = présente**, **0 = absente**. La matrice porte uniquement sur
+les 14 variables de données et conserve toutes les observations.
+
+```{r presence_absence}
+presence_absence <- 1L * !is.na(don[variables])
+print(head(presence_absence))
+print(summary(as.data.frame(presence_absence)))
+```
+
+## 12. Réaliser et afficher l'ACM de la matrice
+
+Les indicateurs sont transformés en facteurs. Les colonnes constantes n'apportent
+aucune information à l'ACM et sont exclues. La provenance est ajoutée comme
+variable qualitative supplémentaire : elle ne construit pas les axes.
+VIM fournit les graphiques précédents ; l'ACM est calculée par FactoMineR.
+Le graphe des variables représente leur association avec les deux axes
+(rapports de corrélation au carré, eta²). Le graphe des modalités distingue
+ensuite présence et absence pour chaque variable.
+
+```{r acm_presence_absence}
+variables_actives <- names(which(apply(presence_absence, 2, function(x) {
+  length(unique(x)) > 1L
+})))
+cat("Indicateurs constants exclus :",
+    paste(setdiff(variables, variables_actives), collapse = ", "), "\n")
+if (acm_disponible && length(variables_actives) >= 2L) {
+  donnees_acm <- as.data.frame(lapply(variables_actives, function(variable) {
+    factor(presence_absence[, variable], levels = c(0, 1),
+           labels = c("Absente", "Presente"))
+  }))
+  names(donnees_acm) <- variables_actives
+  donnees_acm$provenance <- don$provenance
+  acm <- FactoMineR::MCA(donnees_acm, ncp = 2,
+                         quali.sup = ncol(donnees_acm), graph = FALSE)
+  print(acm$eig)
+  print(acm$var$coord)
+  if (ggplot_disponible) {
+    coord_variables <- data.frame(variable = rownames(acm$var$eta2),
+                                   axe1 = acm$var$eta2[, 1], axe2 = acm$var$eta2[, 2])
+    graphe_variables <- ggplot2::ggplot(
+      coord_variables, ggplot2::aes(x = axe1, y = axe2, label = variable)
+    ) +
+      ggplot2::geom_point(color = "#10346A", size = 3) +
+      ggplot2::geom_text(vjust = -0.8, size = 3, check_overlap = FALSE) +
+      ggplot2::coord_cartesian(xlim = c(0, 1), ylim = c(0, 1), clip = "off") +
+      ggplot2::labs(title = "ACM — graphe des variables",
+                    x = sprintf("Dimension 1 (%.1f %%) — eta²", acm$eig[1, 2]),
+                    y = sprintf("Dimension 2 (%.1f %%) — eta²", acm$eig[2, 2])) +
+      ggplot2::theme_minimal(base_size = 12)
+    print(graphe_variables)
+  }
+  print(plot(acm, choix = "var", invisible = "quali.sup",
+             title = "ACM — modalités de présence et d'absence"))
+  print(plot(acm, choix = "ind", habillage = "provenance", label = "none",
+             title = "ACM — observations selon leur provenance"))
+} else {
+  message("ACM indisponible : FactoMineR absent ou moins de deux indicateurs variables.")
+}
+```
+
+Les axes décrivent des profils de présence et d'absence, pas les valeurs
+cliniques elles-mêmes. Ces diagnostics ne suffisent pas à déterminer le
+mécanisme des données manquantes (MCAR, MAR ou MNAR).
