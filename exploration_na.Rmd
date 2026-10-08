@@ -1,0 +1,525 @@
+---
+title: "Heart Disease — exploration des valeurs manquantes"
+output:
+  html_notebook:
+    toc: true
+    toc_depth: 2
+lang: fr
+---
+
+Exécuter les cellules dans l'ordre depuis la racine du projet. Les quatre
+fichiers `processed` sont conservés intégralement : aucune suppression de
+lignes ni imputation. Chaque étape correspond à une cellule de code.
+
+## 0. Préparer les packages
+
+Si nécessaire, exécuter dans la console
+`install.packages(c("VIM", "FactoMineR", "ggplot2"))`.
+VIM fournit les diagnostics graphiques ; FactoMineR réalise l'ACM des
+indicateurs de présence et d'absence.
+
+```{r preparation}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 11, fig.height = 7)
+vim_disponible <- requireNamespace("VIM", quietly = TRUE)
+acm_disponible <- requireNamespace("FactoMineR", quietly = TRUE)
+ggplot_disponible <- requireNamespace("ggplot2", quietly = TRUE)
+if (!vim_disponible) message('Installer VIM : install.packages("VIM")')
+if (!acm_disponible) message('Installer FactoMineR : install.packages("FactoMineR")')
+if (!ggplot_disponible) message('Installer ggplot2 : install.packages("ggplot2")')
+```
+
+## 1. Importer les quatre datasets processed
+
+Les noms des variables reprennent ceux de `R/import.R`. L'import en caractères
+préserve volontairement les `?` pour les transformer dans une cellule dédiée.
+
+```{r importation}
+fichiers <- c(
+  cleveland = "processed.cleveland.data",
+  hungarian = "processed.hungarian.data",
+  switzerland = "processed.switzerland.data",
+  va = "processed.va.data"
+)
+variables <- c(
+  "age", "sexe", "type_doul_thor", "pa_repos", "cholesterol",
+  "glyc_jeun_elevee", "ecg_repos", "fc_max", "angine_effort",
+  "depress_st", "pente_st", "nb_vaisseaux", "test_thallium", "diagnostic"
+)
+chemins <- file.path("dataset", fichiers)
+if (!all(file.exists(chemins))) {
+  stop("Fichiers introuvables : ", paste(chemins[!file.exists(chemins)], collapse = ", "),
+       ". Ouvrir le projet à sa racine.")
+}
+datasets <- setNames(lapply(chemins, function(chemin) {
+  d <- read.table(
+    chemin, header = FALSE, sep = ",", colClasses = "character",
+    na.strings = character(0), strip.white = TRUE,
+    comment.char = "", quote = "", fill = FALSE
+  )
+  stopifnot(ncol(d) == length(variables))
+  names(d) <- variables
+  d
+}), names(fichiers))
+print(data.frame(provenance = names(datasets), n = vapply(datasets, nrow, integer(1))),
+      row.names = FALSE)
+```
+
+## 2. Fusionner et créer la variable provenance
+
+```{r fusion}
+don <- do.call(rbind, lapply(names(datasets), function(site) {
+  d <- datasets[[site]]
+  d$provenance <- site
+  d
+}))
+rownames(don) <- NULL
+don$provenance <- factor(don$provenance, levels = names(fichiers))
+print(dim(don))
+print(table(don$provenance))
+```
+
+## 3. Afficher head et summary avant nettoyage
+
+Les mesures sont encore des chaînes de caractères ; un second résumé numérique
+sera affiché après le remplacement des `?`.
+
+```{r apercu}
+print(head(don))
+print(summary(don))
+```
+
+## 4. Transformer les ? en NA et convertir les mesures en numérique
+
+```{r remplacer_points_interrogation}
+n_interrogations <- vapply(don[variables], function(x) sum(x == "?"), integer(1))
+for (variable in variables) {
+  x <- don[[variable]]
+  x[x == "?"] <- NA_character_
+  valeurs <- as.numeric(x)
+  if (any(!is.na(x) & is.na(valeurs))) {
+    stop("Valeur non numérique inattendue dans ", variable)
+  }
+  don[[variable]] <- valeurs
+}
+print(data.frame(variable = variables, n_recodes = unname(n_interrogations)),
+      row.names = FALSE)
+print(summary(don))
+```
+
+## 5. Transformer les zéros aberrants en NA
+
+Règle analytique reprise de `R/import.R` : les zéros de `pa_repos` et
+`cholesterol` sont considérés comme des mesures indisponibles. Les zéros des
+autres variables sont conservés, notamment pour les catégories et le diagnostic.
+
+```{r remplacer_zeros}
+variables_zero_na <- c("pa_repos", "cholesterol")
+recodage_zeros <- do.call(rbind, lapply(levels(don$provenance), function(site) {
+  d <- don[don$provenance == site, variables_zero_na, drop = FALSE]
+  data.frame(
+    provenance = site, variable = variables_zero_na,
+    n_zeros_recodes = unname(vapply(d, function(x) sum(x == 0, na.rm = TRUE), integer(1)))
+  )
+}))
+for (variable in variables_zero_na) {
+  don[[variable]][!is.na(don[[variable]]) & don[[variable]] == 0] <- NA_real_
+}
+print(recodage_zeros, row.names = FALSE)
+```
+
+## 6. Pourcentage de NA par variable et provenance
+
+Le dénominateur est le nombre d'observations du site concerné.
+
+```{r pourcentages_na}
+na_par_provenance <- do.call(rbind, lapply(levels(don$provenance), function(site) {
+  d <- don[don$provenance == site, variables, drop = FALSE]
+  n_na <- colSums(is.na(d))
+  data.frame(
+    provenance = site, variable = variables, n_observations = nrow(d),
+    n_na = unname(n_na), pct_na = round(100 * unname(n_na) / nrow(d), 2)
+  )
+}))
+print(na_par_provenance, row.names = FALSE)
+if (ggplot_disponible) {
+  donnees_heatmap <- na_par_provenance
+  donnees_heatmap$provenance <- factor(donnees_heatmap$provenance,
+                                      levels = names(fichiers))
+  donnees_heatmap$variable <- factor(donnees_heatmap$variable,
+                                    levels = rev(variables))
+  heatmap_na <- ggplot2::ggplot(
+    donnees_heatmap, ggplot2::aes(x = provenance, y = variable, fill = pct_na)
+  ) +
+    ggplot2::geom_tile(color = "white", linewidth = 0.5) +
+    ggplot2::geom_text(
+      ggplot2::aes(label = sprintf("%.1f %%", pct_na), color = pct_na >= 50),
+      size = 3.5
+    ) +
+    ggplot2::scale_color_manual(values = c("FALSE" = "#222222", "TRUE" = "white"),
+                                guide = "none") +
+    ggplot2::scale_fill_gradient(low = "#F1F5FA", high = "#10346A",
+                                 limits = c(0, 100), name = "% de NA") +
+    ggplot2::scale_x_discrete(labels = c(cleveland = "Cleveland", hungarian = "Hongrie",
+                                        switzerland = "Suisse", va = "VA Long Beach")) +
+    ggplot2::labs(title = "Pourcentage de valeurs manquantes par site",
+                  subtitle = "Après remplacement des ? et recodage ciblé des zéros",
+                  x = "Provenance", y = NULL) +
+    ggplot2::theme_minimal(base_size = 12) +
+    ggplot2::theme(panel.grid = ggplot2::element_blank())
+  print(heatmap_na)
+} else {
+  message("Heatmap indisponible : installer ggplot2.")
+}
+```
+
+## 7. Résumer les combinaisons de NA avec VIM
+
+La provenance est exclue des diagnostics de mesures manquantes.
+
+```{r combinaisons_na}
+if (vim_disponible) {
+  combinaisons_na <- VIM::aggr(don[variables], plot = FALSE)
+  print(summary(combinaisons_na))
+} else {
+  message("Résumé VIM indisponible : installer VIM puis relancer cette cellule.")
+}
+```
+
+## 8. Afficher aggr
+
+L'argument documenté de tri est `sortVars = TRUE`.
+[Documentation VIM](https://statistikat.github.io/VIM/reference/aggr.html).
+
+```{r graphique_aggr, fig.width=14, fig.height=8}
+if (vim_disponible) {
+  VIM::aggr(don[variables], only.miss = TRUE, sortVars = TRUE,
+            numbers = TRUE, cex.axis = 0.7)
+} else {
+  message("Graphique aggr indisponible : installer VIM.")
+}
+```
+
+## 9. Afficher matrixplot
+
+Le mode interactif est désactivé pour permettre le rendu du notebook.
+
+```{r graphique_matrixplot, fig.width=14, fig.height=8}
+if (vim_disponible) {
+  VIM::matrixplot(don[variables], sortby = "cholesterol", interactive = FALSE,
+                  main = "Valeurs observées et manquantes", cex.axis = 0.7)
+} else {
+  message("Matrixplot indisponible : installer VIM.")
+}
+```
+
+## 10. Afficher marginplot
+
+Le graphique examine la pression au repos et le cholestérol : le nuage des
+observations complètes et les distributions marginales éclairent leurs absences.
+
+```{r graphique_marginplot}
+paire <- c("pa_repos", "cholesterol")
+if (vim_disponible && all(colSums(!is.na(don[paire])) >= 2)) {
+  VIM::marginplot(don[paire],
+                  xlab = "Pression au repos (mmHg)",
+                  ylab = "Cholestérol (mg/dL)")
+} else {
+  message("Marginplot indisponible : VIM absent ou trop peu de valeurs observées.")
+}
+```
+
+## 11. Créer la matrice de présence-absence
+
+Convention : **1 = présente**, **0 = absente**. La matrice porte uniquement sur
+les 14 variables de données et conserve toutes les observations.
+
+```{r presence_absence}
+presence_absence <- 1L * !is.na(don[variables])
+print(head(presence_absence))
+print(summary(as.data.frame(presence_absence)))
+```
+
+## 12. Réaliser et afficher l'ACM de la matrice
+
+Les indicateurs sont transformés en facteurs. Les colonnes constantes n'apportent
+aucune information à l'ACM et sont exclues. La provenance est ajoutée comme
+variable qualitative supplémentaire : elle ne construit pas les axes.
+VIM fournit les graphiques précédents ; l'ACM est calculée par FactoMineR.
+Le graphe des variables représente leur association avec les deux axes
+(rapports de corrélation au carré, eta²). Le graphe des modalités distingue
+ensuite présence et absence pour chaque variable.
+
+```{r acm_presence_absence}
+variables_actives <- names(which(apply(presence_absence, 2, function(x) {
+  length(unique(x)) > 1L
+})))
+cat("Indicateurs constants exclus :",
+    paste(setdiff(variables, variables_actives), collapse = ", "), "\n")
+if (acm_disponible && length(variables_actives) >= 2L) {
+  donnees_acm <- as.data.frame(lapply(variables_actives, function(variable) {
+    factor(presence_absence[, variable], levels = c(0, 1),
+           labels = c("Absente", "Presente"))
+  }))
+  names(donnees_acm) <- variables_actives
+  donnees_acm$provenance <- don$provenance
+  acm <- FactoMineR::MCA(donnees_acm, ncp = 2,
+                         quali.sup = ncol(donnees_acm), graph = FALSE)
+  print(acm$eig)
+  print(acm$var$coord)
+  if (ggplot_disponible) {
+    coord_variables <- data.frame(variable = rownames(acm$var$eta2),
+                                   axe1 = acm$var$eta2[, 1], axe2 = acm$var$eta2[, 2])
+    graphe_variables <- ggplot2::ggplot(
+      coord_variables, ggplot2::aes(x = axe1, y = axe2, label = variable)
+    ) +
+      ggplot2::geom_point(color = "#10346A", size = 3) +
+      ggplot2::geom_text(vjust = -0.8, size = 3, check_overlap = FALSE) +
+      ggplot2::coord_cartesian(xlim = c(0, 1), ylim = c(0, 1), clip = "off") +
+      ggplot2::labs(title = "ACM — graphe des variables",
+                    x = sprintf("Dimension 1 (%.1f %%) — eta²", acm$eig[1, 2]),
+                    y = sprintf("Dimension 2 (%.1f %%) — eta²", acm$eig[2, 2])) +
+      ggplot2::theme_minimal(base_size = 12)
+    print(graphe_variables)
+  }
+  print(plot(acm, choix = "var", invisible = "quali.sup",
+             title = "ACM — modalités de présence et d'absence"))
+  print(plot(acm, choix = "ind", habillage = "provenance", label = "none",
+             title = "ACM — observations selon leur provenance"))
+} else {
+  message("ACM indisponible : FactoMineR absent ou moins de deux indicateurs variables.")
+}
+```
+
+Les axes décrivent des profils de présence et d'absence, pas les valeurs
+cliniques elles-mêmes. Ces diagnostics ne suffisent pas à déterminer le
+mécanisme des données manquantes (MCAR, MAR ou MNAR).
+
+## 13. Définir le protocole du benchmark conditionnel
+
+Ce benchmark évalue **chaque cible séparément sur ses valeurs réellement
+observées**. À chaque répétition, 10 % de ces observations (arrondi inférieur)
+seront masquées uniformément sans remise. Les lignes où la cible est déjà NA
+ne participent ni à l'apprentissage ni au score de cette cible. Elles restent
+intactes dans `don`. Chaque modèle reçoit exactement le même apprentissage
+et le même test ; la vraie cible du test lui est inaccessible.
+
+Les résultats mesurent donc la reconstruction de valeurs observées sous
+masquage aléatoire. Ils ne démontrent pas la précision sur les NA naturels,
+notamment si leur distribution diffère selon les sites. Les prédicteurs peuvent
+contenir des NA : leurs médianes, modes, niveaux catégoriels et standardisations
+sont calculés **sur l'apprentissage uniquement**. Des indicateurs d'absence
+complètent les prédicteurs quantitatifs. Une catégorie du test absente de
+l'apprentissage est remplacée par le mode appris.
+
+Le diagnostic est exclu par défaut des prédicteurs, pour un usage où il n'est pas
+encore connu. La provenance est incluse comme prédicteur catégoriel. Modifier
+`predicteurs_benchmark` permet d'évaluer un autre contexte, dans un nouveau
+répertoire de résultats.
+
+```{r protocole_benchmark}
+source("R/benchmark_imputation.R", encoding = "UTF-8")
+# Installer au besoin :
+# install.packages(c("ranger", "FNN", "FactoMineR", "nnet", "mice", "digest"))
+
+types_benchmark <- c(
+  age = "quantitative", sexe = "nominale", type_doul_thor = "nominale",
+  pa_repos = "quantitative", cholesterol = "quantitative",
+  glyc_jeun_elevee = "nominale", ecg_repos = "nominale", fc_max = "quantitative",
+  angine_effort = "nominale", depress_st = "quantitative", pente_st = "ordinale",
+  nb_vaisseaux = "discrete", test_thallium = "nominale", provenance = "nominale"
+)
+# Correspondance ordinale : pente_st conserve ici l'ordre des codes 1, 2, 3.
+# L'erreur absolue sur ses codes est une métrique secondaire ; le taux d'erreur
+# demeure la métrique principale, ces codes n'étant pas une mesure continue.
+predicteurs_benchmark <- names(types_benchmark)
+donnees_benchmark <- don[predicteurs_benchmark]
+cibles_benchmark <- names(types_benchmark)[
+  vapply(donnees_benchmark, anyNA, logical(1))
+]
+seed_globale <- 20261007L 
+proportion_masquee <- 0.10  # Doit rester strictement inférieure à 0.20.
+n_repetitions <- 30L       # Augmenter par exemple à 100 ou 500 pour prolonger.
+n_workers <- 1L           # Linux/macOS : augmenter pour paralléliser les tâches.
+dossier_benchmark <- "resultats/benchmark_imputation"
+parametres_benchmark <- list(
+  num.trees = 200L, k = 5L, ncp = 5L, mice_m = 5L, em_maxit = 100L
+)
+modeles_a_tester <- modeles_imputation[
+  c("mean", "median", "mode", "RandomForest", "Knn", "ACP", "EM", "AFDM", "mice")
+]
+print(data.frame(
+  variable = cibles_benchmark, type = types_benchmark[cibles_benchmark],
+  n_observe = vapply(donnees_benchmark[cibles_benchmark], function(x) sum(!is.na(x)), integer(1)),
+  n_na_naturels = vapply(donnees_benchmark[cibles_benchmark], function(x) sum(is.na(x)), integer(1)),
+  row.names = NULL
+))
+```
+
+## 14. Fonctions et modèles d'imputation
+
+Les fonctions génériques sont dans `R/benchmark_imputation.R`, chargé dans la
+cellule précédente. `benchmark_imputation()` accepte une liste nommée de
+fonctions : ajouter un modèle ne nécessite pas de boucle spécifique par cible.
+Une fonction reçoit `train`, `test`, `cible`, `type`, `types`, `parametres` et
+`seed`, puis renvoie une prédiction par ligne de `test`. La cible n'existe pas
+parmi les colonnes de `test`.
+
+| Modèle | Méthode évaluée |
+|:--|:--|
+| mean | Moyenne de la cible quantitative observée dans l'apprentissage |
+| median | Médiane quantitative ; projection sur un code appris pour ordinal/discret |
+| mode | Modalité la plus fréquente, référence utile pour les catégories |
+| RandomForest | Régression ou classification ranger, 200 arbres par défaut |
+| Knn | Voisins sur prédicteurs standardisés et catégories encodées ; moyenne ou vote |
+| ACP | ACP des prédicteurs encodés, puis régression linéaire ou multinomiale sur les composantes |
+| EM | EM gaussien avec moments conditionnels, puis espérance conditionnelle de la cible quantitative ; prédicteurs quantitatifs uniquement |
+| AFDM | AFDM/FAMD des prédicteurs mixtes, puis régression linéaire ou multinomiale sur les composantes |
+| mice | PMM quantitative, logreg binaire, polyreg nominale, polr ordinale ; agrégation de 5 imputations |
+
+ACP et AFDM sont ici des **modèles conditionnels sur composantes**, et non des
+reconstructions conjointes par `imputePCA` ou `imputeFAMD`. Les hyperparamètres
+sont fixés à l'avance ; ils ne sont pas optimisés sur les masques de test.
+EM suppose un modèle gaussien et n'est pas appliqué aux catégories. MICE
+impute uniquement la cible après le prétraitement commun des prédicteurs :
+il ne s'agit pas d'une chaîne multivariée complète. Les lignes de test sont
+exclues de l'ajustement avec `ignore`, conformément à la
+[documentation de mice](https://amices.org/mice/reference/mice).
+Les NA naturels des prédicteurs sont conservés pour EM et intégrés à son estimation.
+
+Les codes prédits pour les cibles ordinales ou discrètes sont projetés sur les
+codes présents dans l'apprentissage. Les scores portent sur ces prédictions
+finales. Les méthodes inapplicables, erreurs de package ou d'ajustement et
+avertissements sont conservés explicitement dans les résultats.
+
+```{r fonctions_benchmark}
+print(names(modeles_a_tester))
+print(args(benchmark_imputation))
+print(args(resumer_benchmark))
+# Exemple de restriction à une seule cible :
+# benchmark_imputation(donnees_benchmark, types_benchmark,
+#   modeles = modeles_a_tester, cibles = "cholesterol", repetitions = 100L,
+#   dossier = "resultats/benchmark_cholesterol")
+```
+
+## 15. Exécuter ou reprendre les simulations
+
+Chaque couple cible/répétition possède un fichier RDS contenant les scores,
+les indices exacts du masque, les lignes d'apprentissage et les versions de la
+session R. La sauvegarde utilise un fichier temporaire puis un renommage.
+Une interruption peut nécessiter de recalculer la répétition en cours, mais
+les répétitions terminées sont rechargées. Les seeds sont déterminées par la
+seed globale, le nom de la cible, la répétition et le modèle ; le nombre de
+workers et l'ordre d'exécution ne changent pas les résultats.
+
+Pour prolonger la même expérience, augmenter `n_repetitions` et relancer les
+cellules 13 et 15. Pour changer les données, modèles, types, paramètres, seed,
+proportion ou versions des packages, utiliser un **nouveau dossier** : un
+manifeste empêche de mélanger des protocoles incompatibles. Les échecs enregistrés
+sont repris comme tels ; pour retenter une tâche à configuration identique,
+supprimer uniquement son fichier `variable_rep_XXXXX.rds`.
+
+La parallélisation utilise des processus sous Linux/macOS ; sous Windows,
+l'exécution reste séquentielle. Ranger utilise un seul thread par tâche.
+Ne pas lancer simultanément deux benchmarks dans le même dossier.
+
+```{r execution_benchmark}
+resultats_benchmark <- benchmark_imputation(
+  donnees = donnees_benchmark, types = types_benchmark,
+  modeles = modeles_a_tester, cibles = cibles_benchmark,
+  repetitions = n_repetitions, proportion = proportion_masquee,
+  seed = seed_globale, dossier = dossier_benchmark,
+  workers = n_workers, parametres = parametres_benchmark
+)
+print(head(resultats_benchmark[
+  c("variable", "modele_imputation", "repetition", "metrique", "valeur", "statut")
+], 30))
+print(unique(resultats_benchmark[resultats_benchmark$statut != "ok",
+  c("variable", "modele_imputation", "statut", "message")]))
+```
+
+## 16. Résumer les erreurs et leur variabilité
+
+Les sorties longues comportent `variable | modele_imputation | repetition |
+metrique | valeur`, plus des colonnes de traçabilité. RMSE et MAE sont calculées
+pour les variables quantitatives ; taux d'erreur et accuracy pour les catégories ;
+RMSE et MAE sont ajoutées pour les variables ordinales ou discrètes.
+
+Le résumé indique la moyenne, l'écart-type, la médiane, les quantiles 2,5 et
+97,5 % des scores de simulation et un intervalle t approximatif autour de la
+moyenne. Ces intervalles décrivent la variabilité du masquage **sur ce dataset
+fixe**, pas l'incertitude de généralisation à de nouveaux patients. Le nom
+`erreur_moyenne` représente une accuracy moyenne sur les lignes `accuracy` :
+pour cette métrique seulement, une valeur plus élevée est meilleure.
+Les échecs sont exclus du résumé, mais leur nombre doit être examiné.
+
+```{r resume_benchmark}
+resume_benchmark <- resumer_benchmark(resultats_benchmark)
+print(resume_benchmark, row.names = FALSE)
+print(with(resultats_benchmark[!duplicated(resultats_benchmark[
+  c("variable", "modele_imputation", "repetition")]), ],
+  table(variable, modele_imputation, statut)))
+sauver_rds_atomique(resume_benchmark, file.path(dossier_benchmark, "resume.rds"))
+write.csv(resume_benchmark, file.path(dossier_benchmark, "resume.csv"), row.names = FALSE)
+```
+
+## 17. Comparer les modèles et retenir un candidat par variable
+
+Le classement utilise RMSE pour une cible quantitative et le taux d'erreur pour
+les autres. Il est établi **sur l'intersection des répétitions réussies de tous
+les modèles applicables** : un modèle ne peut pas profiter de masques plus faciles
+parce qu'il a échoué ailleurs. Les modèles sans aucun succès sont signalés et
+exclus du classement. Les différences minimes et les rares catégories doivent
+être examinées avant de retenir un gagnant. Aucune imputation des NA naturels
+n'est effectuée à cette étape.
+
+```{r classement_benchmark}
+classements <- lapply(cibles_benchmark, function(cible) {
+  metrique <- if (types_benchmark[[cible]] == "quantitative") "RMSE" else "taux_erreur"
+  d <- resultats_benchmark[resultats_benchmark$variable == cible &
+    resultats_benchmark$metrique == metrique & resultats_benchmark$statut == "ok" &
+    is.finite(resultats_benchmark$valeur), ]
+  if (!nrow(d)) return(NULL)
+  modeles_valides <- unique(d$modele_imputation)
+  repetitions_communes <- Reduce(intersect, lapply(modeles_valides, function(m)
+    d$repetition[d$modele_imputation == m]))
+  if (!length(repetitions_communes)) {
+    message("Aucune répétition réussie commune pour ", cible)
+    return(NULL)
+  }
+  s <- resumer_benchmark(d[d$repetition %in% repetitions_communes, ])
+  s <- s[order(s$erreur_moyenne, s$modele_imputation), ]
+  s$rang <- rank(s$erreur_moyenne, ties.method = "min")
+  s
+})
+classement_benchmark <- do.call(rbind, classements)
+print(classement_benchmark, row.names = FALSE)
+if (!is.null(classement_benchmark)) {
+  meilleurs_modeles <- classement_benchmark[classement_benchmark$rang == 1, ]
+  print(meilleurs_modeles, row.names = FALSE)
+  write.csv(classement_benchmark, file.path(dossier_benchmark, "classement.csv"), row.names = FALSE)
+  write.csv(meilleurs_modeles, file.path(dossier_benchmark, "meilleurs_modeles.csv"), row.names = FALSE)
+}
+```
+
+## 18. Visualiser la distribution des scores
+
+Une facette par variable évite de comparer directement des erreurs exprimées
+dans des unités différentes. Ces distributions complètent le classement moyen.
+
+```{r graphique_benchmark, fig.width=14, fig.height=10}
+if (ggplot_disponible) {
+  affichage <- resultats_benchmark[resultats_benchmark$statut == "ok", ]
+  principales <- ifelse(types_benchmark[affichage$variable] == "quantitative", "RMSE", "taux_erreur")
+  affichage <- affichage[affichage$metrique == principales, ]
+  if (nrow(affichage)) {
+    print(ggplot2::ggplot(affichage, ggplot2::aes(x = modele_imputation, y = valeur)) +
+      ggplot2::geom_boxplot(outlier.shape = NA, fill = "#C8DDF0") +
+      ggplot2::geom_point(alpha = 0.25, size = 0.7) +
+      ggplot2::facet_wrap(~ variable + metrique, scales = "free_y", ncol = 3) +
+      ggplot2::labs(title = "Précision des imputations selon la variable",
+                    x = "Modèle d'imputation", y = "Erreur sur les valeurs masquées") +
+      ggplot2::theme_minimal(base_size = 11) +
+      ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 60, hjust = 1)))
+  }
+}
+```

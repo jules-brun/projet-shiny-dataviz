@@ -2,3 +2,7 @@
 .Rhistory
 .RData
 .Ruserdata
+
+dataset/kaggle/
+R/import_kaggle.R
+
