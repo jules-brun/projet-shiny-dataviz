@@ -504,22 +504,62 @@ if (!is.null(classement_benchmark)) {
 ## 18. Visualiser la distribution des scores
 
 Une facette par variable évite de comparer directement des erreurs exprimées
-dans des unités différentes. Ces distributions complètent le classement moyen.
+dans des unités différentes. Les modèles sont nommés sur l'axe vertical et
+gardent la même couleur et le même ordre dans toutes les facettes.
+Ces distributions complètent le classement moyen.
 
-```{r graphique_benchmark, fig.width=14, fig.height=10}
+```{r graphique_benchmark, fig.width=14, fig.height=18}
 if (ggplot_disponible) {
   affichage <- resultats_benchmark[resultats_benchmark$statut == "ok", ]
   principales <- ifelse(types_benchmark[affichage$variable] == "quantitative", "RMSE", "taux_erreur")
   affichage <- affichage[affichage$metrique == principales, ]
   if (nrow(affichage)) {
-    print(ggplot2::ggplot(affichage, ggplot2::aes(x = modele_imputation, y = valeur)) +
-      ggplot2::geom_boxplot(outlier.shape = NA, fill = "#C8DDF0") +
-      ggplot2::geom_point(alpha = 0.25, size = 0.7) +
-      ggplot2::facet_wrap(~ variable + metrique, scales = "free_y", ncol = 3) +
+    ordre_modeles <- names(modeles_a_tester)
+    libelles_modeles <- c(
+      mean = "Moyenne", median = "Médiane", mode = "Mode",
+      RandomForest = "Random Forest", Knn = "KNN", ACP = "ACP",
+      EM = "EM", AFDM = "AFDM", mice = "MICE"
+    )
+    # Conserver aussi les noms de modèles personnalisés.
+    etiquettes <- setNames(ordre_modeles, ordre_modeles)
+    connus <- intersect(ordre_modeles, names(libelles_modeles))
+    etiquettes[connus] <- libelles_modeles[connus]
+    couleurs_modeles <- setNames(
+      grDevices::hcl.colors(length(ordre_modeles), palette = "Dark 3"), ordre_modeles
+    )
+    affichage$modele_imputation <- factor(affichage$modele_imputation,
+                                          levels = rev(ordre_modeles))
+    print(ggplot2::ggplot(affichage, ggplot2::aes(
+      x = valeur, y = modele_imputation,
+      fill = modele_imputation, color = modele_imputation
+    )) +
+      ggplot2::geom_boxplot(outlier.shape = NA, alpha = 0.4,
+                            orientation = "y", width = 0.6) +
+      ggplot2::geom_point(
+        position = ggplot2::position_jitter(width = 0, height = 0.12, seed = 20261007),
+        alpha = 0.45, size = 1
+      ) +
+      ggplot2::facet_wrap(~ variable + metrique, scales = "free_x", ncol = 2) +
+      ggplot2::scale_y_discrete(labels = etiquettes, drop = FALSE) +
+      ggplot2::scale_fill_manual(values = couleurs_modeles, breaks = ordre_modeles,
+                                 labels = etiquettes[ordre_modeles], name = "Modèle") +
+      ggplot2::scale_color_manual(values = couleurs_modeles, breaks = ordre_modeles,
+                                  labels = etiquettes[ordre_modeles], name = "Modèle") +
       ggplot2::labs(title = "Précision des imputations selon la variable",
-                    x = "Modèle d'imputation", y = "Erreur sur les valeurs masquées") +
-      ggplot2::theme_minimal(base_size = 11) +
-      ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 60, hjust = 1)))
+                    subtitle = "Une couleur par modèle ; une erreur plus faible indique une meilleure précision",
+                    x = "Erreur sur les valeurs masquées", y = NULL,
+                    caption = "Taux d'erreur entre 0 et 1 ; RMSE dans l'unité de la variable.\nUne ligne vide indique un modèle sans score disponible pour cette variable.") +
+      ggplot2::guides(fill = ggplot2::guide_legend(nrow = 2, byrow = TRUE),
+                      color = ggplot2::guide_legend(nrow = 2, byrow = TRUE)) +
+      ggplot2::theme_minimal(base_size = 12) +
+      ggplot2::theme(
+        axis.text.y = ggplot2::element_text(size = 11, color = "#222222"),
+        strip.text = ggplot2::element_text(face = "bold", size = 12),
+        panel.grid.major.y = ggplot2::element_blank(),
+        panel.grid.minor = ggplot2::element_blank(),
+        panel.spacing = grid::unit(1.2, "lines"),
+        legend.position = "bottom"
+      ))
   }
 }
 ```
