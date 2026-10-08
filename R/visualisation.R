@@ -46,43 +46,44 @@ preparer_parcours <- function(donnees, colonnes, categories, imputation = FALSE,
        avertissements = unique(avertissements), methode = methode)
 }
 
+# Présentation par cartes ; les contrôles et leur espace de noms restent identiques.
 parcours_ui <- function(id, imputation = FALSE) {
   ns <- NS(id)
   tagList(
-    if (imputation) tagList(
-      p("Imputation factorielle régularisée des mesures cliniques. Le diagnostic et la provenance ne servent pas à reconstruire les valeurs manquantes."),
-      selectInput(ns("methode"), "Méthode d'imputation",
-        choices = c("AFDM : extension de l'ACP aux données mixtes" = "AFDM",
-                    "ACP des mesures numériques + ACM des catégories" = "ACP")),
-      sliderInput(ns("ncp"), "Dimensions retenues pour l'imputation", min = 1, max = 4, value = 2, step = 1),
-      p(class = "note", "Deux dimensions constituent le réglage initial, sans sélection automatique. Comparer plusieurs valeurs permet d'examiner la sensibilité des relations à l'imputation. Les valeurs observées sont conservées ; seules les cellules manquantes sont remplacées.")) else
-      p("Suppression des observations comportant au moins un NA sur les 14 variables cliniques. Aucune variable n'est supprimée et aucune valeur n'est imputée."),
+    if (imputation) carte_heart("Réglages de l'imputation factorielle",
+      p(class = "note", "Imputation factorielle régularisée des mesures cliniques. Le diagnostic et la provenance ne servent pas à reconstruire les valeurs manquantes."),
+      bslib::layout_columns(
+        selectInput(ns("methode"), "Méthode d'imputation",
+          choices = c("AFDM : extension de l'ACP aux données mixtes" = "AFDM",
+                      "ACP des mesures numériques + ACM des catégories" = "ACP")),
+        sliderInput(ns("ncp"), "Dimensions retenues pour l'imputation", min = 1, max = 4, value = 2, step = 1),
+        col_widths = bslib::breakpoints(xs = 12, lg = 6), fill = FALSE),
+      p(class = "note", "Deux dimensions constituent le réglage initial, sans sélection automatique. Comparer plusieurs valeurs permet d'examiner la sensibilité des relations à l'imputation. Les valeurs observées sont conservées ; seules les cellules manquantes sont remplacées."),
+      icone = "layers", plein_ecran = FALSE) else
+      p(class = "note", "Suppression des observations comportant au moins un NA sur les 14 variables cliniques. Aucune variable n'est supprimée et aucune valeur n'est imputée."),
     div(class = "callout", textOutput(ns("resume"))),
-    h4("1 · Composition de l'échantillon par centre"),
-    plotOutput(ns("centres"), height = "300px"),
-    if (imputation) tagList(h4("Valeurs reconstruites par variable"),
+    carte_heart("1 · Composition de l'échantillon par centre", plotOutput(ns("centres"), height = "300px"), icone = "geo-alt"),
+    if (imputation) carte_heart("Valeurs reconstruites par variable",
       plotOutput(ns("imputations"), height = "380px"),
-      p(class = "note", "Une forte proportion de valeurs reconstruites rend l'interprétation de la variable plus dépendante de la méthode d'imputation.")),
-    h4("2 · Mesures cliniques selon le diagnostic"),
-    plotOutput(ns("distributions"), height = "520px"),
-    p(class = "note", "La ligne centrale est la médiane, la boîte couvre les 50 % centraux et les points isolés indiquent les valeurs au-delà des moustaches. Chaque mesure possède sa propre échelle."),
-    h4("3 · Modalités cliniques selon le diagnostic"),
-    plotOutput(ns("categories"), height = "620px"),
-    p(class = "note", "Chaque barre représente 100 % des observations d'un groupe de diagnostic. Les modalités suivent les codes UCI ; les proportions permettent de comparer des groupes de tailles différentes."),
-    h4("4 · Corrélations entre mesures numériques"),
-    plotOutput(ns("correlations"), height = "480px"),
-    p(class = "note", "Corrélations de Spearman : −1 indique une relation décroissante, +1 une relation croissante. Une corrélation ne démontre pas de causalité."),
-    h4("5 · Relations entre deux mesures"),
-    fluidRow(column(4, selectInput(ns("x"), "Mesure horizontale", choices = NULL)),
-      column(4, selectInput(ns("y"), "Mesure verticale", choices = NULL)),
-      column(4, selectInput(ns("couleur"), "Couleur des observations",
-        choices = c("Diagnostic" = "diagnostic", "Centre" = "provenance")))),
-    plotOutput(ns("relations"), height = "400px"),
-    h4("6 · ACM des variables catégorielles"),
-    p("L'ACM décrit les profils des variables catégorielles. Le diagnostic et la provenance sont supplémentaires : ils ne construisent pas les axes."),
-    plotOutput(ns("acm_individus"), height = "440px"),
-    plotOutput(ns("acm_modalites"), height = "540px"),
-    p(class = "note", "Les observations proches ont des profils catégoriels similaires. Les modalités proches de l'origine sont peu discriminantes sur ce plan. Une proximité entre modalités de variables différentes s'interprète avec leur qualité de représentation ; les axes des deux parcours sont calculés séparément."),
+      p(class = "note", "Une forte proportion de valeurs reconstruites rend l'interprétation de la variable plus dépendante de la méthode d'imputation."), icone = "layers"),
+    carte_heart("2 · Mesures cliniques selon le diagnostic", plotOutput(ns("distributions"), height = "520px"),
+      p(class = "note", "La ligne centrale est la médiane, la boîte couvre les 50 % centraux et les points isolés indiquent les valeurs au-delà des moustaches. Chaque mesure possède sa propre échelle."), icone = "heart-pulse"),
+    carte_heart("3 · Modalités cliniques selon le diagnostic", plotOutput(ns("categories"), height = "620px"),
+      p(class = "note", "Chaque barre représente 100 % des observations d'un groupe de diagnostic. Les modalités suivent les codes UCI ; les proportions permettent de comparer des groupes de tailles différentes."), icone = "bar-chart"),
+    carte_heart("4 · Corrélations entre mesures numériques", plotOutput(ns("correlations"), height = "480px"),
+      p(class = "note", "Corrélations de Spearman : −1 indique une relation décroissante, +1 une relation croissante. Une corrélation ne démontre pas de causalité."), icone = "grid-3x3"),
+    carte_heart("5 · Relations entre deux mesures",
+      bslib::layout_columns(selectInput(ns("x"), "Mesure horizontale", choices = NULL),
+        selectInput(ns("y"), "Mesure verticale", choices = NULL),
+        selectInput(ns("couleur"), "Couleur des observations",
+          choices = c("Diagnostic" = "diagnostic", "Centre" = "provenance")),
+        col_widths = bslib::breakpoints(xs = 12, lg = 4), fill = FALSE),
+      plotOutput(ns("relations"), height = "400px"), icone = "graph-up"),
+    carte_heart("6 · ACM des variables catégorielles",
+      p(class = "note", "L'ACM décrit les profils des variables catégorielles. Le diagnostic et la provenance sont supplémentaires : ils ne construisent pas les axes."),
+      plotOutput(ns("acm_individus"), height = "440px"), plotOutput(ns("acm_modalites"), height = "540px"),
+      p(class = "note", "Les observations proches ont des profils catégoriels similaires. Les modalités proches de l'origine sont peu discriminantes sur ce plan. Une proximité entre modalités de variables différentes s'interprète avec leur qualité de représentation ; les axes des deux parcours sont calculés séparément."),
+      icone = "diagram-3"),
     if (imputation) p(class = "note", "Les résultats décrivent un jeu complété par une imputation unique. Les relations peuvent être renforcées par la reconstruction et ne mesurent pas l'incertitude d'imputation.")
   )
 }
@@ -108,7 +109,7 @@ parcours_serveur <- function(id, reference, colonnes, categories, libelles, sour
       d$groupe <- factor(d$diagnostic, levels = 0:1, labels = c("Absence", "Présence"))
       d
     })
-    palette <- c("Absence" = "#165DDE", "Présence" = "#E88432")
+    palette <- c("Absence" = "#78A9DF", "Présence" = "#EF6473")
     output$resume <- renderText({
       p <- parcours()
       paste(nrow(p$donnees), "observations analysées sur", nrow(reference), "—",
@@ -122,18 +123,18 @@ parcours_serveur <- function(id, reference, colonnes, categories, libelles, sour
       b <- as.data.frame(table(factor(d$provenance, levels = names(sources)), d$groupe))
       names(b) <- c("centre", "diagnostic", "n")
       ggplot(b, aes(centre, n, fill = diagnostic)) + geom_col(width = .65) +
-        geom_text(aes(label = ifelse(n > 0, n, "")), position = position_stack(vjust = .5), color = "white") +
+        geom_text(aes(label = ifelse(n > 0, n, "")), position = position_stack(vjust = .5), color = palette_heart$bg) +
         scale_fill_manual(values = palette) + scale_x_discrete(labels = sources) +
         labs(x = NULL, y = "Observations", fill = "Diagnostic") +
-        theme_minimal(base_size = 12) + theme(legend.position = "top")
+        theme_heart(base_size = 12) + theme(legend.position = "top")
     }, res = 110)
     output$imputations <- renderPlot({
       p <- parcours()
       b <- data.frame(variable = colnames(p$masque), pct = 100 * colMeans(p$masque))
-      ggplot(b, aes(pct, reorder(variable, pct))) + geom_col(fill = "#E88432") +
-        geom_text(aes(label = sprintf("%.1f %%", pct)), hjust = -.1) +
+      ggplot(b, aes(pct, reorder(variable, pct))) + geom_col(fill = palette_heart$amber) +
+        geom_text(aes(label = sprintf("%.1f %%", pct)), hjust = -.1, colour = palette_heart$text) +
         scale_y_discrete(labels = libelles) + scale_x_continuous(limits = c(0, 110), breaks = seq(0,100,25)) +
-        labs(x = "Pourcentage de valeurs imputées", y = NULL) + theme_minimal(base_size = 12)
+        labs(x = "Pourcentage de valeurs imputées", y = NULL) + theme_heart(base_size = 12)
     }, res = 110)
     output$distributions <- renderPlot({
       d <- donnees()
@@ -142,7 +143,7 @@ parcours_serveur <- function(id, reference, colonnes, categories, libelles, sour
       ggplot(b, aes(diagnostic, valeur, fill = diagnostic)) +
         geom_boxplot(width = .6, outlier.alpha = .3, show.legend = FALSE) +
         facet_wrap(~variable, scales = "free_y", ncol = 3) +
-        scale_fill_manual(values = palette) + labs(x = "Diagnostic", y = NULL) + theme_minimal(base_size = 11)
+        scale_fill_manual(values = palette) + labs(x = "Diagnostic", y = NULL) + theme_heart(base_size = 11)
     }, res = 110)
     output$categories <- renderPlot({
       d <- donnees()
@@ -155,19 +156,19 @@ parcours_serveur <- function(id, reference, colonnes, categories, libelles, sour
       ggplot(b, aes(diagnostic, n, fill = modalite)) + geom_col(position = "fill", width = .6) +
         facet_wrap(~variable, ncol = 3) +
         scale_y_continuous(labels = function(x) paste0(100*x, " %")) +
-        scale_fill_brewer(palette = "Set2") + labs(x = "Diagnostic", y = "Proportion", fill = "Code UCI") +
-        theme_minimal(base_size = 11) + theme(legend.position = "bottom")
+        scale_fill_manual(values = c("#78A9DF", "#64C4B2", "#E5B36C", "#BC9ACB", "#EF6473", "#9FB6CB", "#6D809A")) + labs(x = "Diagnostic", y = "Proportion", fill = "Code UCI") +
+        theme_heart(base_size = 11) + theme(legend.position = "bottom")
     }, res = 110)
     output$correlations <- renderPlot({
       d <- donnees()
       m <- cor(d[quanti], method = "spearman")
       b <- as.data.frame(as.table(m)); names(b) <- c("x", "y", "rho")
-      ggplot(b, aes(x, y, fill = rho)) + geom_tile(color = "white") +
-        geom_text(aes(label = sprintf("%.2f", rho)), size = 4) +
-        scale_fill_gradient2(low = "#E88432", mid = "white", high = "#165DDE", limits = c(-1,1)) +
+      ggplot(b, aes(x, y, fill = rho)) + geom_tile(color = "#26364C") +
+        geom_text(aes(label = sprintf("%.2f", rho)), size = 4, colour = palette_heart$text) +
+        scale_fill_gradient2(low = "#AB4E5C", mid = "#162438", high = "#5279A5", limits = c(-1,1)) +
         scale_x_discrete(labels = libelles) + scale_y_discrete(labels = libelles) +
         coord_equal() + labs(x = NULL, y = NULL, fill = "Spearman") +
-        theme_minimal(base_size = 11) + theme(axis.text.x = element_text(angle = 25, hjust = 1), panel.grid = element_blank())
+        theme_heart(base_size = 11) + theme(axis.text.x = element_text(angle = 25, hjust = 1), panel.grid = element_blank())
     }, res = 110)
     output$relations <- renderPlot({
       req(input$x %in% quanti, input$y %in% quanti, input$couleur %in% c("diagnostic", "provenance"))
@@ -176,10 +177,12 @@ parcours_serveur <- function(id, reference, colonnes, categories, libelles, sour
       d$reconstruit <- if (imputation)
         rowSums(parcours()$masque[, c(input$x, input$y), drop = FALSE]) > 0 else FALSE
       ggplot(d, aes(.data[[input$x]], .data[[input$y]], color = couleur, shape = reconstruit)) +
-        geom_point(alpha = .55, size = 2) + scale_shape_manual(values = c("FALSE" = 16, "TRUE" = 4),
+        geom_point(alpha = .55, size = 2) +
+        scale_color_manual(values = if (input$couleur == "diagnostic") palette else
+          setNames(c("#78A9DF", "#64C4B2", "#E5B36C", "#BC9ACB"), unname(sources))) + scale_shape_manual(values = c("FALSE" = 16, "TRUE" = 4),
           labels = c("FALSE" = "Observées", "TRUE" = "Au moins une imputée")) +
         labs(x = libelles[input$x], y = libelles[input$y], color = if (input$couleur == "diagnostic") "Diagnostic" else "Centre", shape = "Mesures") +
-        theme_minimal(base_size = 12) + theme(legend.position = "bottom")
+        theme_heart(base_size = 12) + theme(legend.position = "bottom")
     }, res = 110)
     acm <- reactive({
       validate(need(requireNamespace("FactoMineR", quietly = TRUE), 'Installer FactoMineR pour afficher l’ACM.'))
@@ -203,9 +206,9 @@ parcours_serveur <- function(id, reference, colonnes, categories, libelles, sour
       a <- acm(); d <- donnees(); axes <- axes_acm(a)
       b <- data.frame(x = a$ind$coord[,1], y = a$ind$coord[,2], diagnostic = d$groupe)
       ggplot(b, aes(x,y,color = diagnostic)) + geom_point(alpha = .4, size = 1.8) +
-        geom_hline(yintercept = 0, color = "grey80") + geom_vline(xintercept = 0, color = "grey80") +
+        geom_hline(yintercept = 0, color = "#40536C") + geom_vline(xintercept = 0, color = "#40536C") +
         scale_color_manual(values = palette) + labs(title = "ACM · Profils des observations", x = axes$x, y = axes$y, color = "Diagnostic") +
-        coord_equal() + theme_minimal(base_size = 12) + theme(legend.position = "bottom")
+        coord_equal() + theme_heart(base_size = 12) + theme(legend.position = "bottom")
     }, res = 110)
     output$acm_modalites <- renderPlot({
       a <- acm(); axes <- axes_acm(a)
@@ -213,12 +216,13 @@ parcours_serveur <- function(id, reference, colonnes, categories, libelles, sour
         modalite = rownames(a$var$coord), qualite = rowSums(a$var$cos2[,1:2]))
       b$variable <- sub(" = .*", "", b$modalite)
       ggplot(b, aes(x,y,color = variable)) +
-        geom_hline(yintercept = 0, color = "grey80") + geom_vline(xintercept = 0, color = "grey80") +
+        geom_hline(yintercept = 0, color = "#40536C") + geom_vline(xintercept = 0, color = "#40536C") +
         geom_point(aes(size = qualite)) +
+        scale_color_manual(values = c("#78A9DF", "#64C4B2", "#E5B36C", "#BC9ACB", "#EF6473", "#9FB6CB", "#D4CB9E", "#7FAB9C")) +
         ggrepel::geom_text_repel(aes(label = modalite), seed = 42, max.overlaps = Inf, size = 3) +
         labs(title = "ACM · Relations entre modalités", x = axes$x, y = axes$y,
              color = "Variable", size = "Qualité sur le plan") +
-        coord_equal() + theme_minimal(base_size = 11) + theme(legend.position = "bottom")
+        coord_equal() + theme_heart(base_size = 11) + theme(legend.position = "bottom")
     }, res = 110)
   })
 }

@@ -282,11 +282,11 @@ graphique_na_provenance <- function(bilan = na_par_provenance) {
   d$texte_clair <- d$pct_na >= 55
 
   ggplot2::ggplot(d, ggplot2::aes(x = provenance, y = variable, fill = pct_na)) +
-    ggplot2::geom_tile(color = "white", linewidth = 0.5) +
+    ggplot2::geom_tile(color = "#26364C", linewidth = 0.5) +
     ggplot2::geom_text(ggplot2::aes(label = etiquette, color = texte_clair),
                        size = 3.5, show.legend = FALSE) +
-    ggplot2::scale_color_manual(values = c("FALSE" = "#18212B", "TRUE" = "white")) +
-    ggplot2::scale_fill_gradient(low = "#F1F5F9", high = "#08306B",
+    ggplot2::scale_color_manual(values = c("FALSE" = "#EEF3FA", "TRUE" = "#080F1B")) +
+    ggplot2::scale_fill_gradient(low = "#162438", high = "#78A9DF",
                                  limits = c(0, 100), breaks = seq(0, 100, 25),
                                  name = "% de NA") +
     ggplot2::scale_x_discrete(labels = etiquettes_sources, drop = FALSE) +
@@ -298,9 +298,14 @@ graphique_na_provenance <- function(bilan = na_par_provenance) {
       x = NULL, y = NULL,
       caption = "Source : UCI Heart Disease. Après dédoublonnage et recodage ciblé des zéros.\nNA initiaux + zéros de pression au repos et de cholestérol ; aucune imputation."
     ) +
-    ggplot2::theme_minimal(base_size = 11) +
+    (if (exists("theme_heart", mode = "function")) theme_heart(base_size = 11) else
+      ggplot2::theme_dark(base_size = 11) + ggplot2::theme(
+        plot.background = ggplot2::element_rect(fill = "#111D2D", colour = NA),
+        panel.background = ggplot2::element_rect(fill = "#111D2D", colour = NA),
+        text = ggplot2::element_text(colour = "#EEF3FA"),
+        legend.background = ggplot2::element_rect(fill = "#111D2D", colour = NA))) +
     ggplot2::theme(panel.grid = ggplot2::element_blank(),
-                   axis.text = ggplot2::element_text(color = "#18212B"))
+                   axis.text = ggplot2::element_text(color = "#EEF3FA"))
 }
 
 if (requireNamespace("ggplot2", quietly = TRUE)) {

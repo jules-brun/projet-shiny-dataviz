@@ -3,6 +3,8 @@
 library(shiny)
 library(ggplot2)
 library(tidyverse)
+source("R/design.R", local = TRUE)
+source("R/overview.R", local = TRUE)
 
 # Chargement une fois au démarrage, dans un environnement séparé.
 # import.R peut imprimer un graphique : un périphérique temporaire sans fichier
@@ -100,23 +102,23 @@ function(input, output, session) {
       if (variable == "diagnostic")
         d$valeur <- factor(d$valeur, levels = c("0", "1"),
                           labels = c("Absence", "Présence"))
-      ggplot(d, aes(valeur)) + geom_bar(fill = "#165DDE", width = .65) +
+      ggplot(d, aes(valeur)) + geom_bar(fill = "#78A9DF", width = .65) +
         labs(x = libelle, y = "Observations", caption = "Valeurs manquantes exclues. Les catégories cliniques suivent les codes UCI.") +
-        theme_minimal(base_size = 12)
+        theme_heart(base_size = 12)
     } else {
-      ggplot(d, aes(valeur)) + geom_histogram(bins = 25, fill = "#165DDE", color = "white") +
+      ggplot(d, aes(valeur)) + geom_histogram(bins = 25, fill = "#78A9DF", color = "white") +
         labs(x = libelle, y = "Observations", caption = "Valeurs manquantes exclues.") +
-        theme_minimal(base_size = 12)
+        theme_heart(base_size = 12)
     }
   }, res = 110)
   output$effectifs <- renderPlot({
     d <- as.data.frame(table(factor(apercu()$provenance, levels = names(libelles_sources))))
     names(d) <- c("provenance", "n")
-    ggplot(d, aes(provenance, n)) + geom_col(fill = "#165DDE", width = .6) +
-      geom_text(aes(label = n), vjust = -.4) +
+    ggplot(d, aes(provenance, n)) + geom_col(fill = "#78A9DF", width = .6) +
+      geom_text(aes(label = n), vjust = -.4, colour = palette_heart$text) +
       scale_x_discrete(labels = libelles_sources) +
       scale_y_continuous(expand = expansion(mult = c(0, .15))) +
-      labs(x = NULL, y = "Observations après nettoyage") + theme_minimal(base_size = 12)
+      labs(x = NULL, y = "Observations après nettoyage") + theme_heart(base_size = 12)
   }, res = 110)
   output$dictionnaire <- renderUI({
     req(input$variable_apercu %in% import_uci$colonnes)
@@ -141,21 +143,23 @@ function(input, output, session) {
   output$combinaisons_na <- renderPlot({
     validate(need(requireNamespace("VIM", quietly = TRUE),
       'Installer VIM pour afficher ce graphique : install.packages("VIM")'))
-    ancien_par <- par(las = 2)
+    ancien_par <- par(no.readonly = TRUE)
     on.exit(par(ancien_par))
+    par(las = 2, bg = palette_heart$card, fg = palette_heart$text,
+        col.axis = palette_heart$muted, col.lab = palette_heart$muted, col.main = palette_heart$text)
     VIM::aggr(donnees_uci[import_uci$colonnes],
-      col = c("#B8D4FA", "#E88432"),
+      col = c(palette_heart$blue, palette_heart$amber),
       only.miss = TRUE, sortVars = TRUE, sortCombs = TRUE,
       numbers = FALSE, prop = TRUE, cex.axis = .75,
       ylabs = c("Proportion de NA", "Fréquence des combinaisons"))
   }, res = 110)
   output$na_global_ui <- renderPlot({
     d <- data.frame(nb_na = rowSums(is.na(donnees_uci[import_uci$colonnes])))
-    ggplot(d, aes(nb_na)) + geom_bar(fill = "#165DDE", width = .7) +
+    ggplot(d, aes(nb_na)) + geom_bar(fill = "#78A9DF", width = .7) +
       scale_x_continuous(breaks = 0:length(import_uci$colonnes)) +
       labs(x = "Nombre de mesures manquantes sur 14", y = "Observations",
            caption = "Toutes les observations nettoyées sont incluses, y compris celles sans NA.") +
-      theme_minimal(base_size = 12)
+      theme_heart(base_size = 12)
   }, res = 110)
   output$na_detail <- renderPlot({ import_uci$graphique_na_provenance() }, res = 110)
 
@@ -166,5 +170,6 @@ function(input, output, session) {
     variables_categorielles, libelles, libelles_sources, imputation = TRUE)
   serveur_tests_absence(input, output, session, associations_absence,
                         dictionnaire_na, libelles_sources)
+  overview_serveur(input, output, session, donnees_uci, import_uci, libelles_sources)
 
 }

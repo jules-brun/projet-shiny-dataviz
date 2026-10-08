@@ -1,59 +1,43 @@
-# Interface Shiny — lancer depuis la racine avec shiny::runApp(".")
+# Interface bslib — les identifiants des contrôles et des sorties sont conservés.
 library(shiny)
+library(bslib)
+source("R/design.R", local = TRUE)
+source("R/overview.R", local = TRUE)
 source("R/visualisation.R", local = TRUE)
 
-fluidPage(
-  tags$head(tags$style(HTML("
-    :root { --blue:#165DDE; --ink:#143052; --muted:#60758B; --line:#E2EBF6; }
-    body { background:#F5F8FD; color:var(--ink); font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-size:15px; line-height:1.6; }
-    .container-fluid { max-width:1360px; padding:32px; }
-    .hero { padding:12px 0 24px; max-width:900px; }
-    .eyebrow { color:var(--blue); font-size:12px; letter-spacing:.15em; font-weight:700; text-transform:uppercase; }
-    h1 { font-size:38px; font-weight:700; letter-spacing:-1.2px; margin:10px 0; line-height:1.2; }
-    h4 { font-size:19px; font-weight:650; margin:30px 0 14px; }
-    .hero p,.note { color:var(--muted); }
-    .nav-tabs { border:0; gap:6px; display:flex; flex-wrap:wrap; margin-bottom:16px; }
-    .nav-tabs>li>a { border:0!important; border-radius:10px; color:var(--muted); padding:12px 22px; font-weight:600; }
-    .nav-tabs>li.active>a,.nav-tabs>li.active>a:focus,.nav-tabs>li.active>a:hover { background:var(--blue); color:white; }
-    .nav-tabs>li>a:hover { background:#E8F0FE; color:var(--blue); }
-    .tab-content { background:#FFF; border:1px solid var(--line); border-radius:20px; padding:28px; box-shadow:0 5px 25px #173b6610; }
-    .callout { background:#EFF5FF; border-left:3px solid var(--blue); padding:16px 20px; border-radius:0 10px 10px 0; margin:16px 0; }
-    .recodage { background:#EFF5FF; border:1px solid #B8D4FA; border-top:4px solid var(--blue); border-radius:12px; padding:20px; margin-bottom:16px; }
-    .recodage h4 { margin:0 0 12px; }
-    .recodage .regle { color:var(--blue); font-size:24px; font-weight:700; }
-    .form-control,.selectize-input { border-color:var(--line); border-radius:9px; box-shadow:none; }
-    .btn-primary { background:var(--blue); border:0; border-radius:10px; padding:12px 20px; font-weight:600; }
-    a { color:var(--blue); } a:focus,button:focus { outline:2px solid #3987FF; outline-offset:3px; }
-    pre { background:#F4F8FE; border:1px solid var(--line); border-radius:12px; padding:18px; }
-    details { margin:20px 0; padding:18px; border:1px solid var(--line); border-radius:12px; }
-    summary { cursor:pointer; color:var(--blue); font-weight:600; }
-    .recit-matrice { overflow-x:auto; margin:16px 0; }
-    .footer { color:var(--muted); font-size:12px; padding:24px 0; }
-    .shiny-plot-output { margin:20px 0; }
-    @media(max-width:767px) { .container-fluid { padding:16px; } h1 { font-size:28px; } .tab-content { padding:16px; } .nav-tabs>li>a { padding:10px 12px; } }
-  "))),
-  div(class = "hero",
-    div(class = "eyebrow", "UCI HEART DISEASE / EXPLORATION"),
-    h1("Diagnostic cardiaque et prédiction"),
-    p("Analyse des variables cliniques associées à la présence d’une maladie cardiaque et de leur apport à la prédiction. Cette étude s’appuie sur le jeu de données Heart Disease du dépôt UCI, issu de quatre centres : Cleveland, la Hongrie, la Suisse et le VA Medical Center de Long Beach.")
-  ),
-  tabsetPanel(
-    tabPanel("1 · Données",
-      selectInput("source_apercu", "Provenance", choices = c("Toutes" = "toutes")),
-      helpText("Ce filtre concerne uniquement cet onglet."),
-      h4("Effectifs par provenance"), plotOutput("effectifs", height = "300px"),
-      h4("Distribution des variables cliniques"),
-      selectInput("variable_apercu", "Variable", choices = NULL),
-      uiOutput("dictionnaire"), textOutput("dimensions"),
-      plotOutput("apercu", height = "380px"),
-      h4("Doublons : une occurrence conservée par paire"),
+page_navbar(
+  title = div(class = "heart-brand", icone_heart("heart-pulse", "1.4em"),
+    span("HEART", span(class = "brand-light", " / DISEASE"))),
+  id = "navigation_heart", selected = "overview", window_title = "Heart Disease · Analyse cardiovasculaire",
+  lang = "fr", theme = theme_application_heart(), fillable = FALSE,
+  navbar_options = navbar_options(bg = palette_heart$bg, theme = "dark", underline = FALSE),
+  header = tags$head(tags$link(rel = "stylesheet", type = "text/css", href = "style.css")),
+  footer = div(class = "heart-footer", span("HEART / DISEASE"),
+    span("UCI Heart Disease · Janosi et al. (1989) · CC BY 4.0"),
+    tags$a("DOI 10.24432/C52P4X", href = "https://doi.org/10.24432/C52P4X", target = "_blank", rel = "noopener noreferrer")),
+  nav_panel("Overview", icon = icone_heart("grid-1x2"), value = "overview", overview_ui()),
+  nav_panel("Données", icon = icone_heart("database"), value = "donnees",
+    entete_heart("01 / LA COHORTE", "Explorer les données cliniques",
+      "Comprendre les distributions, les provenances et les choix de nettoyage."),
+    layout_columns(
+      carte_heart("Périmètre de l'exploration",
+        selectInput("source_apercu", "Provenance", choices = c("Toutes" = "toutes")),
+        helpText("Ce filtre concerne uniquement cette page."),
+        textOutput("dimensions"), icone = "funnel", plein_ecran = FALSE),
+      carte_heart("Effectifs par provenance", plotOutput("effectifs", height = "280px"), icone = "geo-alt"),
+      col_widths = breakpoints(xs = 12, lg = c(4, 8)), fill = FALSE),
+    carte_heart("Distribution des variables cliniques",
+      selectInput("variable_apercu", "Variable", choices = NULL), uiOutput("dictionnaire"),
+      plotOutput("apercu", height = "380px"), icone = "bar-chart"),
+    carte_heart("Traçabilité du dédoublonnage",
       div(class = "callout", textOutput("bilan_doublons")),
-      p("Comparaison des 14 variables originales au sein de chaque provenance, avant recodage des zéros. La première occurrence est conservée. Les NA aux mêmes positions comptent comme identiques. Ce choix de dédoublonnage ne constitue pas une preuve d'identité du patient."),
-      uiOutput("doublons")
-    ),
-    tabPanel("2 · Valeurs manquantes",
-      h4("Deux étapes pour identifier les valeurs manquantes"),
-      uiOutput("recodages_na"),
+      p(class = "note", "Comparaison des 14 variables originales au sein de chaque provenance, avant recodage des zéros. La première occurrence est conservée. Les NA aux mêmes positions comptent comme identiques. Ce choix de dédoublonnage ne constitue pas une preuve d'identité du patient."),
+      uiOutput("doublons"), icone = "files", plein_ecran = FALSE)
+  ),
+  nav_panel("Valeurs manquantes", icon = icone_heart("clipboard2-pulse"), value = "manquantes",
+    entete_heart("02 / LA QUALITÉ DES DONNÉES", "Lire les absences",
+      "Distinguer les marqueurs UCI des recodages et situer les manques dans la cohorte."),
+    carte_heart("Deux étapes pour identifier les valeurs manquantes", uiOutput("recodages_na"),
       p(class = "note", "Seuls les zéros de pression au repos et de cholestérol sont recodés ; les autres zéros sont conservés. Les graphiques portent sur les données après dédoublonnage et recodage, sans imputation."),
       tags$details(
         tags$summary("Justification bibliographique du recodage des zéros"),
@@ -75,31 +59,30 @@ fluidPage(
           tags$li("National Heart, Lung, and Blood Institute (NIH). ",
             tags$a("Low Blood Pressure.", href = "https://www.nhlbi.nih.gov/health/low-blood-pressure", target = "_blank", rel = "noopener noreferrer"), " Consulté le 3 octobre 2026.")
         )
-      ),
-      h4("Pourcentage de NA par variable et provenance"),
-      p("Chaque case indique la proportion de valeurs manquantes pour une variable dans un centre, après conversion des ? et recodage des zéros ciblés. Le dénominateur est l'effectif nettoyé de ce centre."),
-      plotOutput("na_detail", height = "630px"),
-      h4("Combinaisons de valeurs manquantes"),
-      p("À gauche, les barres indiquent la proportion de NA par variable. À droite, chaque ligne représente une combinaison de valeurs observées (bleu) et manquantes (orange) ; la barre associée indique sa fréquence."),
+      ), icone = "journal-medical", plein_ecran = FALSE),
+    carte_heart("Pourcentage de NA par variable et provenance",
+      p(class = "note", "Chaque case indique la proportion de valeurs manquantes pour une variable dans un centre, après conversion des ? et recodage des zéros ciblés. Le dénominateur est l'effectif nettoyé de ce centre."),
+      plotOutput("na_detail", height = "630px"), icone = "grid-3x3"),
+    carte_heart("Combinaisons de valeurs manquantes",
+      p(class = "note", "À gauche, les barres indiquent la proportion de NA par variable. À droite, chaque ligne représente une combinaison de valeurs observées (bleu) et manquantes (ambre) ; la barre associée indique sa fréquence."),
       plotOutput("combinaisons_na", height = "760px"),
-      p(class = "note", "Les variables sont triées selon leur proportion de NA. Les combinaisons affichées comportent au moins une valeur manquante ; leurs fréquences sont calculées sur toutes les observations nettoyées. La provenance est exclue de ce graphique."),
-      h4("Nombre de mesures manquantes par observation"),
-      plotOutput("na_global_ui", height = "330px")
-    ),
-    tabPanel("3 · Relations entre variables",
-      p("Deux parcours de visualisation pour comparer les relations cliniques avec et sans imputation des valeurs manquantes."),
-      tabsetPanel(
-        tabPanel("Cas complets", parcours_ui("complets")),
-        tabPanel("Imputation par composantes", parcours_ui("imputes", imputation = TRUE))
-      )
-    ),
-    tabPanel("4 · Comprendre les données manquantes",
-      div(class = "recit-matrice",
-        plotOutput("absence_matrice", width = "1400px", height = "650px")
-      ),
-      h4("Conclusion"),
-      div(class = "callout", textOutput("absence_conclusion"))
+      p(class = "note", "Les variables sont triées selon leur proportion de NA. Les combinaisons affichées comportent au moins une valeur manquante ; leurs fréquences sont calculées sur toutes les observations nettoyées. La provenance est exclue de ce graphique."), icone = "intersect"),
+    carte_heart("Nombre de mesures manquantes par observation", plotOutput("na_global_ui", height = "330px"), icone = "bar-chart")
+  ),
+  nav_panel("Relations cliniques", icon = icone_heart("diagram-3"), value = "relations",
+    entete_heart("03 / LES RELATIONS CLINIQUES", "Comparer les profils",
+      "Deux parcours de visualisation : cas complets et imputation par composantes. Les résultats restent exploratoires."),
+    navset_card_tab(
+      nav_panel("Cas complets", icon = icone_heart("check2-circle"), parcours_ui("complets")),
+      nav_panel("Imputation par composantes", icon = icone_heart("layers"), parcours_ui("imputes", imputation = TRUE))
     )
   ),
-  div(class = "footer", "UCI Heart Disease · Janosi et al. (1989) · DOI 10.24432/C52P4X · CC BY 4.0")
+  nav_panel("Absences & associations", icon = icone_heart("grid-3x3"), value = "associations",
+    entete_heart("04 / L'EXPLORATION DES ABSENCES", "Comprendre les données manquantes",
+      "Matrice exploratoire des associations entre les indicateurs d'absence et les caractéristiques observées."),
+    carte_heart("Associations avec l'absence · p-values ajustées BH",
+      div(class = "recit-matrice", plotOutput("absence_matrice", width = "1400px", height = "650px")), icone = "grid-3x3"),
+    carte_heart("Conclusion exploratoire", div(class = "callout", textOutput("absence_conclusion")),
+      icone = "chat-left-text", plein_ecran = FALSE)
+  )
 )

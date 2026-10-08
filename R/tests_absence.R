@@ -216,17 +216,17 @@ serveur_tests_absence <- function(input, output, session, analyse, dictionnaire,
                     "Non calculable", "Non applicable")
     d$affichage <- factor(d$affichage, levels = categories)
     ggplot(d, aes(variable_croisee, variable_absence, fill = affichage)) +
-      geom_tile(colour = "white", linewidth = .6) +
+      geom_tile(colour = "#111D2D", linewidth = .6) +
       geom_text(aes(label = texte, colour = affichage == categories[1]), size = 2.8, show.legend = FALSE) +
-      scale_color_manual(values = c("FALSE" = "#143052", "TRUE" = "white")) +
-      scale_fill_manual(values = setNames(c("#165DDE", "#EAF2FF", "#CBD5E1", "#F3F4F6"), categories), drop = FALSE) +
+      scale_color_manual(values = c("FALSE" = "#EEF3FA", "TRUE" = "#080F1B")) +
+      scale_fill_manual(values = setNames(c("#78A9DF", "#1D3048", "#3F4D60", "#162438"), categories), drop = FALSE) +
       scale_x_discrete(labels = function(x) vapply(libelles[x], function(t) paste(strwrap(t, width = 23), collapse = "\n"), character(1)), drop = FALSE) +
       scale_y_discrete(labels = libelles, drop = FALSE) +
       labs(x = "Variable Y croisée (sur les observations où elle est renseignée)",
         y = "Variable X dont on étudie l'absence", fill = NULL,
         caption = paste(analyse$n_total, "observations nettoyées des quatre centres, sans imputation —",
           analyse$n_tests_valides, "tests valides, correction BH globale. P-values Monte-Carlo estimées ; diagonale non testée.")) +
-      theme_minimal(base_size = 10) + theme(panel.grid = element_blank(),
+      theme_heart(base_size = 10) + theme(panel.grid = element_blank(),
         axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom") +
       guides(fill = guide_legend(nrow = 2))
   }, res = 110)

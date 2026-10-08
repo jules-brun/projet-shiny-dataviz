@@ -2,6 +2,11 @@
 
 **Auteurs :** Antonin, Jules, Youri – Institut Agro, M2 Science des données
 
+L'application actuelle utilise `ui.R` et `server.R`, les quatre fichiers UCI
+dans `dataset/`, et une interface sombre avec `bslib` et `bsicons`.
+Les instructions à jour, la structure et les validations sont décrites dans
+[README_SHINY.txt](README_SHINY.txt). La présentation ci-dessous décrit le projet initial.
+
 ## Objectif
 
 Explorer les facteurs associés aux maladies cardiaques et construire une application **Shiny** permettant :

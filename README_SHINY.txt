@@ -3,17 +3,28 @@ SHINY — HEART DISEASE, VERSION NETTOYÉE
 Conserver ui.R, server.R et le dossier R/ ensemble.
 Garder dataset/ à la racine avec les quatre fichiers processed fournis.
 Depuis une session R ouverte à la racine :
-install.packages(c("shiny", "tidyverse", "VIM", "FactoMineR", "missMDA", "ggrepel"))
+install.packages(c("shiny", "bslib", "bsicons", "tidyverse", "VIM", "FactoMineR", "missMDA", "ggrepel"))
 shiny::runApp(".")
 
 Conserver R/_disable_autoload.R : ce fichier désactive le chargement automatique
 des scripts par Shiny. server.R gère les imports dans leurs environnements dédiés.
 
-L'interface ne présente aucun tableau : distributions des variables et effectifs
-par centre dans le premier onglet ; heatmap, combinaisons et nombre de NA
-dans le deuxième ; deux parcours exploratoires (cas complets et imputation
-factorielle) dans le troisième. Les définitions et décisions de dédoublonnage
-sont décrites en texte. La matrice graphique des associations reste dans le quatrième onglet.
+L'interface bslib présente un accueil Overview, puis les quatre pages d'analyse
+existantes : Données, Valeurs manquantes, Relations cliniques et Absences & associations.
+L'accueil affiche un tracé ECG décoratif, des indicateurs calculés sur la référence
+nettoyée et deux graphiques synthétiques. Les contrôles et sorties d'analyse sont
+conservés. Les définitions et décisions de dédoublonnage restent décrites en texte.
+
+IDENTITÉ VISUELLE ET ORGANISATION
+- ui.R assemble page_navbar, nav_panel, card et les grilles responsive.
+- R/design.R centralise les couleurs, theme_heart() et les composants de présentation.
+- R/overview.R définit l'accueil et ses sorties descriptives, sans modifier la référence.
+- R/visualisation.R conserve les deux modules d'analyse existants.
+- www/style.css adapte navigation, cartes, formulaires et typographie aux écrans mobiles.
+- Graphiques ggplot2 et VIM partagent un fond sombre et des couleurs lisibles.
+- Polices système locales ; aucune police distante ni framework JavaScript supplémentaire.
+- Les neuf variables d'absence et les méthodes statistiques restent inchangées.
+- Les numéros ci-dessous désignent les quatre pages d'analyse, après l'accueil.
 
 NETTOYAGE
 - Comparer les 14 variables originales avant tout recodage.
@@ -71,7 +82,7 @@ Conventions centralisées dans R/tests_absence.R :
 - B = 100000, graine de base = 20261003, reproductibilité et restauration du RNG ;
 - correction Benjamini-Hochberg sur toutes les p-values valides, seuil 5 %.
 
-Couleur et chiffres : p-values ajustées BH ; bleu foncé sous 0,05, bleu clair sinon,
+Couleur et chiffres : p-values ajustées BH ; bleu clair sous 0,05, bleu nuit sinon,
 gris pour non-calculable et diagonale distinguée. Les p-values simulées sont des
 estimations avec résolution minimale 1/(B+1), jamais affichées artificiellement zéro.
 Les classes sont exploratoires, non cliniques, et peuvent influencer les résultats.
@@ -84,9 +95,12 @@ classent pas automatiquement MCAR/MAR/MNAR et ne distinguent pas MAR de MNAR.
 Fichiers actifs : ui.R, server.R et R/tests_absence.R. Le dictionnaire explicite de
 R/gestion_na.R reste réutilisé. R/comprendre_na.R et R/serveur_na.R conservent les
 anciens calculs narratifs mais ne sont plus branchés au serveur de l'application.
-Dépendances inchangées : shiny, ggplot2, DT et R/stats. Aucune installation automatique.
+Dépendances de présentation : shiny, bslib et bsicons ; ggplot2 pour les graphiques.
+Aucune installation automatique au lancement.
 
 VALIDATION
+Rscript tests/validation_design.R
+Rscript tests/validation_visualisation.R
 Rscript tests/validation_tests_absence.R
 Ou Rscript tests/validation_na.R
 Contrôles : neuf lignes autorisées, exclusion de la ligne ECG, tableaux manuels,
