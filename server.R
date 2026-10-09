@@ -38,6 +38,8 @@ libelles_sources <- c(cleveland = "Cleveland", hungarian = "Hongrie",
 # Référence propre au quatrième onglet, avec un identifiant de ligne source stable.
 source("R/gestion_na.R", local = TRUE)
 source("R/visualisation.R", local = TRUE)
+source("R/premieres_visus.R", local = TRUE)
+source("R/acm_imputation.R", local = TRUE)
 dictionnaire_na <- creer_dictionnaire_na(import_uci$dictionnaire, variables_categorielles)
 reference_na <- new.env(parent = emptyenv())
 reference_na$donnees <- donnees_uci
@@ -80,8 +82,12 @@ function(input, output, session) {
   ))
   apercu <- reactive({
     req(input$source_apercu)
-    if (input$source_apercu == "toutes") donnees_uci else
+    d <- if (input$source_apercu == "toutes") donnees_uci else
       donnees_uci[donnees_uci$provenance == input$source_apercu, ]
+    sexe <- input$sexe_apercu %||% "tous"
+    if (sexe != "tous") d <- d[d$sexe %in% as.numeric(sexe), ]
+    age <- input$age_apercu %||% range(donnees_uci$age)
+    d[d$age >= age[1] & d$age <= age[2], ]
   })
   output$dimensions <- renderText({
     paste(nrow(apercu()), "observations —", ncol(apercu()),
@@ -90,27 +96,25 @@ function(input, output, session) {
   updateSelectInput(session, "variable_apercu",
     choices = setNames(import_uci$colonnes, import_uci$dictionnaire$libelle),
     selected = "age")
+  libelles_apercu <- setNames(import_uci$dictionnaire$libelle, import_uci$colonnes)
+  # Paramètres communs au graphe et au texte de la question choisie
+  choix_apercu <- reactive({
+    req(input$question_apercu %in% questions_apercu)
+    list(question = input$question_apercu,
+         var_quanti = input$quanti_apercu %||% "fc_max",
+         var_quali = input$quali_apercu %||% "type_doul_thor",
+         variable = input$variable_apercu %||% "age")
+  })
   output$apercu <- renderPlot({
-    req(input$variable_apercu %in% import_uci$colonnes)
-    variable <- input$variable_apercu
-    d <- data.frame(valeur = apercu()[[variable]])
-    d <- d[!is.na(d$valeur), , drop = FALSE]
-    validate(need(nrow(d) > 0, "Aucune valeur observée pour cette variable dans ce centre."))
-    libelle <- import_uci$dictionnaire$libelle[match(variable, import_uci$colonnes)]
-    if (variable %in% c(variables_categorielles, "diagnostic")) {
-      d$valeur <- factor(d$valeur)
-      if (variable == "diagnostic")
-        d$valeur <- factor(d$valeur, levels = c("0", "1"),
-                          labels = c("Absence", "Présence"))
-      ggplot(d, aes(valeur)) + geom_bar(fill = "#78A9DF", width = .65) +
-        labs(x = libelle, y = "Observations", caption = "Valeurs manquantes exclues. Les catégories cliniques suivent les codes UCI.") +
-        theme_heart(base_size = 12)
-    } else {
-      ggplot(d, aes(valeur)) + geom_histogram(bins = 25, fill = "#78A9DF", color = "white") +
-        labs(x = libelle, y = "Observations", caption = "Valeurs manquantes exclues.") +
-        theme_heart(base_size = 12)
-    }
+    ch <- choix_apercu()
+    graphe_apercu(apercu(), ch$question, ch$var_quanti, ch$var_quali, ch$variable,
+                  libelles_apercu, variables_categorielles, libelles_sources)
   }, res = 110)
+  output$interpretation_apercu <- renderText({
+    ch <- choix_apercu()
+    texte_apercu(apercu(), ch$question, ch$var_quanti, ch$var_quali, ch$variable,
+                 libelles_apercu, variables_categorielles, libelles_sources)
+  })
   output$effectifs <- renderPlot({
     d <- as.data.frame(table(factor(apercu()$provenance, levels = names(libelles_sources))))
     names(d) <- c("provenance", "n")
@@ -171,5 +175,6 @@ function(input, output, session) {
   serveur_tests_absence(input, output, session, associations_absence,
                         dictionnaire_na, libelles_sources)
   overview_serveur(input, output, session, donnees_uci, import_uci, libelles_sources)
+  acm_serveur(input, output, session, donnees_uci)
 
 }
