@@ -5,6 +5,10 @@ Garder dataset/ à la racine avec les quatre fichiers processed fournis.
 Depuis une session R ouverte à la racine :
 install.packages(c("shiny", "bslib", "bsicons", "tidyverse", "VIM", "FactoMineR", "missMDA", "ggrepel"))
 shiny::runApp(".")
+Important : missMDA >= 1.23. Avec missMDA 1.21 et FactoMineR 2.18, les imputations
+régularisées plantent (svd.triplet ne renvoie plus que ncp valeurs singulières).
+Mettre à jour avec install.packages("missMDA").
+app.R lance ui.R et server.R ; les définitions de l'interface et du serveur restent dans ces fichiers.
 
 Conserver R/_disable_autoload.R : ce fichier désactive le chargement automatique
 des scripts par Shiny. server.R gère les imports dans leurs environnements dédiés.
@@ -14,6 +18,33 @@ existantes : Données, Valeurs manquantes, Relations cliniques et Absences & ass
 L'accueil affiche un tracé ECG décoratif, des indicateurs calculés sur la référence
 nettoyée et deux graphiques synthétiques. Les contrôles et sorties d'analyse sont
 conservés. Les définitions et décisions de dédoublonnage restent décrites en texte.
+
+PREMIÈRES VISUALISATIONS DE LA COHORTE
+Onglet Données : on choisit une question, pas un type de graphe.
+- Qui sont les patients ? pyramide des âges par sexe, colorée par diagnostic
+- Quelle mesure sépare malades et sains ? violons + Wilcoxon et delta de Cliff
+- Le risque augmente-t-il avec une mesure ? % de malades par quintile + IC 95 %,
+  Cochran-Armitage et odds ratio logistique
+- Quels profils sont les plus à risque ? barres à 100 % + khi-deux (ou Fisher)
+  et V de Cramér
+- Le diagnostic varie-t-il selon le centre ? / distribution d'une variable
+Filtres communs : provenance, sexe, âge. Sous le graphe, « Ce que montre ce
+graphe » : une phrase fixe + une phrase recalculée sur la sélection, avec une
+alerte si moins de 20 patients. Code dans R/premieres_visus.R.
+Données nettoyées sans imputation ; pas d'interprétation causale.
+
+ACM ET IMPUTATION — CINQUIÈME ONGLET
+Même ACM des variables qualitatives, avec trois gestions des NA au choix :
+- cas complets ;
+- imputation simple par ACM régularisée (missMDA::imputeMCA) ;
+- imputation multiple (missMDA::MIMCA, 20 jeux) : chaque jeu est projeté sur
+  l'ACM, d'où une ellipse à 95 % par modalité.
+Nombre de dimensions choisi par validation croisée (estim_ncpMCA).
+La provenance sert à imputer, le diagnostic jamais ; les deux sont supplémentaires.
+Option pour inclure nb_vaisseaux et test_thallium (plus de 50 % de NA) : en cas
+complets il ne reste alors que 299 patients, presque tous de Cleveland.
+Le texte sous le graphe change selon la gestion des NA choisie.
+Code dans R/acm_imputation.R.
 
 IDENTITÉ VISUELLE ET ORGANISATION
 - ui.R assemble page_navbar, nav_panel, card et les grilles responsive.

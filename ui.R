@@ -4,6 +4,9 @@ library(bslib)
 source("R/design.R", local = TRUE)
 source("R/overview.R", local = TRUE)
 source("R/visualisation.R", local = TRUE)
+source("R/premieres_visus.R", local = TRUE)
+source("R/acm_imputation.R", local = TRUE)
+source("R/a_propos.R", local = TRUE)
 
 page_navbar(
   title = div(class = "heart-brand", icone_heart("heart-pulse", "1.4em"),
@@ -22,13 +25,37 @@ page_navbar(
     layout_columns(
       carte_heart("Périmètre de l'exploration",
         selectInput("source_apercu", "Provenance", choices = c("Toutes" = "toutes")),
-        helpText("Ce filtre concerne uniquement cette page."),
+        radioButtons("sexe_apercu", "Sexe", inline = TRUE,
+          choices = c("Tous" = "tous", "Femmes" = "0", "Hommes" = "1")),
+        sliderInput("age_apercu", "Âge (ans)", min = 28, max = 77, value = c(28, 77), step = 1),
+        helpText("Ces filtres concernent uniquement cette page."),
         textOutput("dimensions"), icone = "funnel", plein_ecran = FALSE),
       carte_heart("Effectifs par provenance", plotOutput("effectifs", height = "280px"), icone = "geo-alt"),
       col_widths = breakpoints(xs = 12, lg = c(4, 8)), fill = FALSE),
-    carte_heart("Distribution des variables cliniques",
-      selectInput("variable_apercu", "Variable", choices = NULL), uiOutput("dictionnaire"),
-      plotOutput("apercu", height = "380px"), icone = "bar-chart"),
+    carte_heart("Premières visualisations",
+      layout_columns(
+        selectInput("question_apercu", "Question explorée", choices = questions_apercu,
+          selected = "age_sexe"),
+        div(
+          conditionalPanel("['quanti_diag', 'tendance'].includes(input.question_apercu)",
+            selectInput("quanti_apercu", "Mesure", choices = c(
+              "Âge" = "age", "Pression au repos" = "pa_repos", "Cholestérol" = "cholesterol",
+              "Fréquence cardiaque max." = "fc_max", "Dépression ST" = "depress_st"),
+              selected = "fc_max")),
+          conditionalPanel("input.question_apercu == 'quali_diag'",
+            selectInput("quali_apercu", "Caractéristique", choices = c(
+              "Type de douleur thoracique" = "type_doul_thor", "Sexe" = "sexe",
+              "Glycémie à jeun" = "glyc_jeun_elevee", "ECG au repos" = "ecg_repos",
+              "Angine à l'effort" = "angine_effort", "Pente du segment ST" = "pente_st",
+              "Nombre de vaisseaux" = "nb_vaisseaux", "Test au thallium" = "test_thallium"))),
+          conditionalPanel("input.question_apercu == 'variable'",
+            selectInput("variable_apercu", "Variable", choices = NULL))),
+        col_widths = breakpoints(xs = 12, lg = c(6, 6)), fill = FALSE),
+      conditionalPanel("input.question_apercu == 'variable'", uiOutput("dictionnaire")),
+      plotOutput("apercu", height = "420px"),
+      div(class = "callout", strong("Ce que montre ce graphe"), textOutput("interpretation_apercu")),
+      p(class = "note", "Données nettoyées, sans imputation. Plusieurs tests sont faits sur les mêmes patients : une p-value isolée proche de 0,05 est à lire avec prudence (correction de Holm). Une association n'est pas une causalité, l'échantillon est hospitalier."),
+      icone = "bar-chart"),
     carte_heart("Traçabilité du dédoublonnage",
       div(class = "callout", textOutput("bilan_doublons")),
       p(class = "note", "Comparaison des 14 variables originales au sein de chaque provenance, avant recodage des zéros. La première occurrence est conservée. Les NA aux mêmes positions comptent comme identiques. Ce choix de dédoublonnage ne constitue pas une preuve d'identité du patient."),
@@ -84,5 +111,7 @@ page_navbar(
       div(class = "recit-matrice", plotOutput("absence_matrice", width = "1400px", height = "650px")), icone = "grid-3x3"),
     carte_heart("Conclusion exploratoire", div(class = "callout", textOutput("absence_conclusion")),
       icone = "chat-left-text", plein_ecran = FALSE)
-  )
+  ),
+  nav_panel("ACM & imputation", icon = icone_heart("bullseye"), value = "acm", acm_ui()),
+  nav_panel("À propos", icon = icone_heart("info-circle"), value = "apropos", a_propos_ui())
 )
