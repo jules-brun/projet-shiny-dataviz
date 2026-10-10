@@ -3,6 +3,9 @@ library(shiny)
 library(plotly)
 source("R/graphiques.R", local = TRUE)
 source("R/visualisation.R", local = TRUE)
+source("R/premieres_visus.R", local = TRUE)
+source("R/acm_imputation.R", local = TRUE)
+source("R/presentation.R", local = TRUE)
 
 fluidPage(
   tags$head(tags$style(HTML("
@@ -32,6 +35,21 @@ fluidPage(
     .recit-matrice { overflow-x:auto; margin:16px 0; }
     .footer { color:var(--muted); font-size:12px; padding:24px 0; }
     .shiny-plot-output,.plotly { margin:16px 0; }
+    .lead { font-size:18px; color:var(--ink); max-width:900px; margin-bottom:8px; }
+    .section-presentation { margin-top:34px; }
+    .section-presentation>h4 { border-bottom:1px solid var(--line); padding-bottom:8px; }
+    .indicateurs,.guide-onglets { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:14px; margin:20px 0; }
+    .indicateur,.guide-carte { background:#F7FAFE; border:1px solid var(--line); border-radius:14px; padding:16px 18px; }
+    .indicateur-valeur { font-size:30px; font-weight:700; color:var(--blue); line-height:1.1; }
+    .indicateur-titre { font-weight:600; }
+    .guide-carte p { margin:6px 0 0; }
+    .table-scroll { overflow-x:auto; }
+    table.dictionnaire { width:100%; border-collapse:collapse; font-size:14px; }
+    table.dictionnaire th { text-align:left; color:var(--muted); font-weight:600; border-bottom:2px solid var(--line); padding:8px 10px; }
+    table.dictionnaire td { border-bottom:1px solid var(--line); padding:10px; vertical-align:top; }
+    table.dictionnaire td.nombre { text-align:right; white-space:nowrap; }
+    .famille { display:inline-block; background:#E8F0FE; color:var(--blue); border-radius:999px; padding:2px 10px; font-size:12px; font-weight:600; white-space:nowrap; }
+    .filtres { background:#F7FAFE; border:1px solid var(--line); border-radius:14px; padding:14px 18px 4px; margin-bottom:8px; }
     @media(max-width:767px) { .container-fluid { padding:16px; } h1 { font-size:28px; } .tab-content { padding:16px; } .nav-tabs>li>a { padding:10px 12px; } }
   "))),
   div(class = "hero",
@@ -39,22 +57,45 @@ fluidPage(
     h1("Diagnostic cardiaque et prédiction"),
     p("Analyse des variables cliniques associées à la présence d’une maladie cardiaque et de leur apport à la prédiction. Cette étude s’appuie sur le jeu de données Heart Disease du dépôt UCI, issu de quatre centres : Cleveland, la Hongrie, la Suisse et le VA Medical Center de Long Beach.")
   ),
-  tabsetPanel(
-    tabPanel("1 · Données",
-      selectInput("source_apercu", "Provenance", choices = c("Toutes" = "toutes")),
-      helpText("Ce filtre concerne uniquement cet onglet ; le centre choisi est mis en avant ci-dessous."),
+  tabsetPanel(id = "onglets",
+    tabPanel("Présentation", value = "presentation", presentation_ui()),
+    tabPanel("1 · Données", value = "donnees",
+      div(class = "filtres", fluidRow(
+        column(4, selectInput("source_apercu", "Provenance", choices = c("Toutes" = "toutes"))),
+        column(3, radioButtons("sexe_apercu", "Sexe", inline = TRUE,
+          choices = c("Tous" = "tous", "Femmes" = "0", "Hommes" = "1"))),
+        column(5, sliderInput("age_apercu", "Âge (ans)", min = 28, max = 77, value = c(28, 77), step = 1))),
+        helpText("Ces filtres concernent uniquement cet onglet."), textOutput("dimensions")),
       h4("Effectifs par provenance et diagnostic"), plotlyOutput("effectifs", height = "320px"),
-      h4("Distribution des variables cliniques"),
-      selectInput("variable_apercu", "Variable", choices = NULL),
-      uiOutput("dictionnaire"), textOutput("dimensions"),
-      plotlyOutput("apercu", height = "400px"),
-      p(class = "note", "Barres empilées par diagnostic ; les valeurs manquantes sont exclues. Survoler une barre affiche l'effectif et sa part dans la modalité ou la classe."),
+      p(class = "note", "Les quatre centres restent affichés, avec les filtres de sexe et d'âge ; le centre choisi est mis en avant."),
+      h4("Premières analyses"),
+      fluidRow(
+        column(6, selectInput("question_apercu", "Question explorée", choices = questions_apercu,
+          selected = "age_sexe")),
+        column(6,
+          conditionalPanel("['quanti_diag', 'tendance'].includes(input.question_apercu)",
+            selectInput("quanti_apercu", "Mesure", choices = c(
+              "Âge" = "age", "Pression au repos" = "pa_repos", "Cholestérol" = "cholesterol",
+              "Fréquence cardiaque max." = "fc_max", "Dépression ST" = "depress_st"),
+              selected = "fc_max")),
+          conditionalPanel("input.question_apercu == 'quali_diag'",
+            selectInput("quali_apercu", "Caractéristique", choices = c(
+              "Type de douleur thoracique" = "type_doul_thor", "Sexe" = "sexe",
+              "Glycémie à jeun" = "glyc_jeun_elevee", "ECG au repos" = "ecg_repos",
+              "Angine à l'effort" = "angine_effort", "Pente du segment ST" = "pente_st",
+              "Nombre de vaisseaux" = "nb_vaisseaux", "Test au thallium" = "test_thallium"))),
+          conditionalPanel("input.question_apercu == 'variable'",
+            selectInput("variable_apercu", "Variable", choices = NULL)))),
+      conditionalPanel("input.question_apercu == 'variable'", uiOutput("dictionnaire")),
+      plotlyOutput("apercu", height = "440px"),
+      div(class = "callout", strong("Ce que montre ce graphe. "), textOutput("interpretation_apercu", inline = TRUE)),
+      p(class = "note", "Données nettoyées, sans imputation. Plusieurs tests sont faits sur les mêmes patients : une p-value isolée proche de 0,05 est à lire avec prudence. Une association n'est pas une causalité, l'échantillon est hospitalier."),
       h4("Doublons : une occurrence conservée par paire"),
       div(class = "callout", textOutput("bilan_doublons")),
       p("Comparaison des 14 variables originales au sein de chaque provenance, avant recodage des zéros. La première occurrence est conservée. Les NA aux mêmes positions comptent comme identiques. Ce choix de dédoublonnage ne constitue pas une preuve d'identité du patient."),
       uiOutput("doublons")
     ),
-    tabPanel("2 · Valeurs manquantes",
+    tabPanel("2 · Valeurs manquantes", value = "manquantes",
       h4("Deux étapes pour identifier les valeurs manquantes"),
       uiOutput("recodages_na"),
       p(class = "note", "Seuls les zéros de pression au repos et de cholestérol sont recodés ; les autres zéros sont conservés. Les graphiques portent sur les données après dédoublonnage et recodage, sans imputation."),
@@ -90,14 +131,14 @@ fluidPage(
       plotlyOutput("na_global_ui", height = "360px"),
       p(class = "note", "Toutes les observations nettoyées sont incluses, y compris celles sans NA. Les couleurs indiquent le centre d'origine.")
     ),
-    tabPanel("3 · Relations entre variables",
+    tabPanel("3 · Relations entre variables", value = "relations",
       p("Deux parcours de visualisation pour comparer les relations cliniques avec et sans imputation des valeurs manquantes."),
       tabsetPanel(
         tabPanel("Cas complets", parcours_ui("complets")),
         tabPanel("Imputation par composantes", parcours_ui("imputes", imputation = TRUE))
       )
     ),
-    tabPanel("4 · Comprendre les données manquantes",
+    tabPanel("4 · Comprendre les données manquantes", value = "absences",
       p("Chaque ligne correspond à une variable dont on étudie l'absence (X), chaque colonne à une caractéristique croisée (Y), mesurée sur les observations où Y est renseignée. Les cellules indiquent la p-value ajustée par Benjamini-Hochberg ; le survol détaille le test, l'effectif et le V de Cramér."),
       div(class = "recit-matrice",
         plotlyOutput("absence_matrice", width = "100%", height = "620px")
@@ -105,7 +146,8 @@ fluidPage(
       p(class = "note", "Variables quantitatives découpées en tertiles. P-values Monte-Carlo estimées ; diagonale non testée ; aucune imputation."),
       h4("Conclusion"),
       div(class = "callout", textOutput("absence_conclusion"))
-    )
+    ),
+    tabPanel("5 · ACM & imputation", value = "acm", acm_ui())
   ),
   div(class = "footer", "UCI Heart Disease · Janosi et al. (1989) · DOI 10.24432/C52P4X · CC BY 4.0")
 )

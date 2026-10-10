@@ -37,6 +37,9 @@ libelles_sources <- c(cleveland = "Cleveland", hungarian = "Hongrie",
 source("R/gestion_na.R", local = TRUE)
 source("R/graphiques.R", local = TRUE)
 source("R/visualisation.R", local = TRUE)
+source("R/premieres_visus.R", local = TRUE)
+source("R/acm_imputation.R", local = TRUE)
+source("R/presentation.R", local = TRUE)
 libelles <- setNames(import_uci$dictionnaire$libelle, import_uci$colonnes)
 dictionnaire_na <- creer_dictionnaire_na(import_uci$dictionnaire, variables_categorielles)
 reference_na <- new.env(parent = emptyenv())
@@ -78,61 +81,55 @@ function(input, output, session) {
   updateSelectInput(session, "source_apercu", choices = c(
     "Toutes" = "toutes", setNames(names(import_uci$fichiers), names(import_uci$fichiers))
   ))
+  # Filtres de sexe et d'âge communs à l'onglet ; la provenance ne filtre que les analyses.
+  filtre_sexe_age <- reactive({
+    d <- donnees_uci
+    sexe <- input$sexe_apercu %||% "tous"
+    if (sexe != "tous") d <- d[d$sexe %in% as.numeric(sexe), ]
+    age <- input$age_apercu %||% range(donnees_uci$age)
+    d[d$age >= age[1] & d$age <= age[2], ]
+  })
   apercu <- reactive({
     req(input$source_apercu)
-    if (input$source_apercu == "toutes") donnees_uci else
-      donnees_uci[donnees_uci$provenance == input$source_apercu, ]
+    d <- filtre_sexe_age()
+    if (input$source_apercu == "toutes") d else d[d$provenance == input$source_apercu, ]
   })
   output$dimensions <- renderText({
-    paste(nrow(apercu()), "observations —", ncol(apercu()),
-          "variables disponibles (diagnostic original inclus).")
+    paste(nrow(apercu()), "patients dans la sélection, sur", nrow(donnees_uci), "au total.")
   })
   updateSelectInput(session, "variable_apercu",
     choices = setNames(import_uci$colonnes, import_uci$dictionnaire$libelle),
     selected = "age")
-  # Distribution empilée par diagnostic : la répartition se lit au survol de chaque barre.
+  # Paramètres communs au graphe et au texte de la question choisie (R/premieres_visus.R).
+  choix_apercu <- reactive({
+    req(input$question_apercu %in% questions_apercu)
+    list(question = input$question_apercu,
+         var_quanti = input$quanti_apercu %||% "fc_max",
+         var_quali = input$quali_apercu %||% "type_doul_thor",
+         variable = input$variable_apercu %||% "age")
+  })
   output$apercu <- renderPlotly({
-    req(input$variable_apercu %in% import_uci$colonnes)
-    variable <- input$variable_apercu
-    a <- apercu()
-    d <- data.frame(valeur = a[[variable]],
-      diagnostic = factor(a$diagnostic, levels = 0:1, labels = names(couleurs_diagnostic)))
-    d <- d[!is.na(d$valeur) & !is.na(d$diagnostic), , drop = FALSE]
-    validate(need(nrow(d) > 0, "Aucune valeur observée pour cette variable dans ce centre."))
-    if (variable %in% c(variables_categorielles, "diagnostic")) {
-      b <- as.data.frame(table(x = libeller_modalites(d$valeur, variable), diagnostic = d$diagnostic))
-      b <- b[b$Freq > 0, ]
-      b$total <- ave(b$Freq, b$x, FUN = sum)
-      b$texte <- paste0("<b>", b$x, "</b><br>", b$diagnostic, " : ", b$Freq, " obs. (",
-                        pct_fr(100 * b$Freq / b$total), " de la modalité)")
-      p <- ggplot(b, aes(x, Freq, fill = diagnostic, text = texte)) +
-        geom_col(width = .6, colour = "white", linewidth = .4)
-    } else {
-      bornes <- pretty(range(d$valeur), n = 25)
-      classe <- cut(d$valeur, bornes, include.lowest = TRUE, right = FALSE)
-      b <- as.data.frame(table(classe = classe, diagnostic = d$diagnostic))
-      i <- as.integer(b$classe)
-      b$milieu <- (bornes[i] + bornes[i + 1]) / 2
-      b <- b[b$Freq > 0, ]
-      b$texte <- paste0("<b>[", bornes[as.integer(b$classe)], " ; ", bornes[as.integer(b$classe) + 1],
-                        "[</b><br>", b$diagnostic, " : ", b$Freq, " obs.")
-      p <- ggplot(b, aes(milieu, Freq, fill = diagnostic, text = texte)) +
-        geom_col(width = diff(bornes)[1] * .92, colour = "white", linewidth = .2)
-    }
-    p <- p + scale_fill_manual(values = couleurs_diagnostic, drop = FALSE) +
-      labs(x = libelles[[variable]], y = "Observations") + theme_app()
-    interactif(p)
+    ch <- choix_apercu()
+    graphe_apercu(apercu(), ch$question, ch$var_quanti, ch$var_quali, ch$variable,
+                  libelles, variables_categorielles, libelles_sources)
+  })
+  output$interpretation_apercu <- renderText({
+    ch <- choix_apercu()
+    texte_apercu(apercu(), ch$question, ch$var_quanti, ch$var_quali, ch$variable,
+                 libelles, variables_categorielles, libelles_sources)
   })
   # Toujours les quatre centres : le centre filtré est mis en avant, pas isolé.
   output$effectifs <- renderPlotly({
+    d <- filtre_sexe_age()
+    validate(need(nrow(d) > 0, "Aucun patient dans cette sélection."))
     b <- as.data.frame(table(
-      centre = factor(libelles_sources[donnees_uci$provenance], levels = libelles_sources),
-      diagnostic = factor(donnees_uci$diagnostic, levels = 0:1, labels = names(couleurs_diagnostic))))
+      centre = factor(libelles_sources[d$provenance], levels = libelles_sources),
+      diagnostic = factor(d$diagnostic, levels = 0:1, labels = names(couleurs_diagnostic))))
     b$total <- ave(b$Freq, b$centre, FUN = sum)
     choisi <- input$source_apercu %||% "toutes"
     b$opacite <- if (choisi == "toutes") 1 else ifelse(b$centre == libelles_sources[[choisi]], 1, .25)
-    b$texte <- paste0("<b>", b$centre, "</b> · ", b$total, " observations<br>", b$diagnostic, " : ",
-                      b$Freq, " (", pct_fr(100 * b$Freq / b$total), ")")
+    b$texte <- paste0("<b>", b$centre, "</b> · ", b$total, " patients<br>", b$diagnostic, " : ",
+                      b$Freq, " (", pct_fr(100 * b$Freq / pmax(b$total, 1)), ")")
     totaux <- unique(b[c("centre", "total", "opacite")])
     p <- ggplot(b, aes(centre, Freq, fill = diagnostic, alpha = opacite, text = texte)) +
       geom_col(width = .55, colour = "white", linewidth = .4) +
@@ -233,5 +230,7 @@ function(input, output, session) {
     variables_categorielles, libelles, libelles_sources, imputation = TRUE)
   serveur_tests_absence(input, output, session, associations_absence,
                         dictionnaire_na, libelles_sources)
+  presentation_serveur(input, output, session, donnees_uci, import_uci, libelles_sources)
+  acm_serveur(input, output, session, donnees_uci)
 
 }

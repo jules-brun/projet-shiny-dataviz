@@ -86,7 +86,8 @@ stopifnot(grepl("Comprendre les données manquantes", html),
   !grepl("na_trait_|na_calcul|na_portee_knn|na_export_", html),
   grepl("1 · Données", html), grepl("2 · Valeurs manquantes", html), grepl("3 · Relations entre variables", html))
 shiny::testServer(serveur, {
-  session$setInputs(source_apercu = "toutes", variable_apercu = "age", recit_variable = "cholesterol")
+  session$setInputs(source_apercu = "toutes", variable_apercu = "age", recit_variable = "cholesterol",
+                    question_apercu = "variable")
   for (nom in c("apercu", "effectifs", "dictionnaire", "doublons", "recodages_na",
     "combinaisons_na", "na_global_ui", "na_detail")) invisible(output[[nom]])
   invisible(output$absence_matrice)
