@@ -83,8 +83,8 @@ parcours_ui <- function(id, imputation = FALSE) {
     h4("6 · ACM des variables catégorielles"),
     p("L'ACM décrit les profils des variables catégorielles. Le diagnostic et la provenance sont supplémentaires : ils ne construisent pas les axes."),
     fluidRow(
-      column(6, plotlyOutput(ns("acm_individus"), height = "520px")),
-      column(6, plotlyOutput(ns("acm_modalites"), height = "520px"))),
+      column(6, h5("Profils des observations"), plotlyOutput(ns("acm_individus"), height = "520px")),
+      column(6, h5("Relations entre modalités"), plotlyOutput(ns("acm_modalites"), height = "520px"))),
     p(class = "note", "Les observations proches ont des profils catégoriels similaires. Seules les modalités les mieux représentées sur le plan sont nommées ; les autres le sont au survol. Les modalités proches de l'origine sont peu discriminantes. Les axes des deux parcours sont calculés séparément."),
     if (imputation) p(class = "note", "Les résultats décrivent un jeu complété par une imputation unique. Les relations peuvent être renforcées par la reconstruction et ne mesurent pas l'incertitude d'imputation.")
   )
@@ -262,8 +262,8 @@ parcours_serveur <- function(id, reference, colonnes, categories, libelles, sour
         geom_hline(yintercept = 0, colour = "grey85") + geom_vline(xintercept = 0, colour = "grey85") +
         geom_point(alpha = .45, size = 1.8) +
         scale_colour_manual(values = couleurs_diagnostic) +
-        labs(title = "Profils des observations", x = axes$x, y = axes$y) +
-        theme_app(11) + theme(plot.title = element_text(size = 12, colour = couleur_encre))
+        labs(x = axes$x, y = axes$y) +
+        theme_app(11)
       interactif(p)
     })
     output$acm_modalites <- renderPlotly({
@@ -283,8 +283,8 @@ parcours_serveur <- function(id, reference, colonnes, categories, libelles, sour
           type = "scatter", mode = "markers+text", textposition = "top center",
           textfont = list(size = 10, color = couleur_encre),
           marker = list(size = ~6 + 14 * qualite, opacity = .8, line = list(color = "white", width = 1))) |>
-        layout(title = list(text = "Relations entre modalités", x = 0, font = list(size = 14, color = couleur_encre)),
-               xaxis = list(title = axes$x, zerolinecolor = "#D5DDE7", gridcolor = "#EDF2F8"),
+        layout(
+          xaxis = list(title = axes$x, zerolinecolor = "#D5DDE7", gridcolor = "#EDF2F8"),
                yaxis = list(title = axes$y, zerolinecolor = "#D5DDE7", gridcolor = "#EDF2F8"))
       habiller(p)
     })

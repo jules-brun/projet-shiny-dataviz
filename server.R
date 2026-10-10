@@ -161,15 +161,23 @@ function(input, output, session) {
     }))
   })
   # Une ligne par combinaison de NA (les plus fréquentes), une colonne par variable concernée.
+  # Calcul unique : le graphe et son résumé (affiché au-dessus, hors du graphe) en dépendent.
+  x_na <- is.na(donnees_uci[import_uci$colonnes])
+  vars_na <- colnames(x_na)[colSums(x_na) > 0]
+  vars_na <- vars_na[order(-colSums(x_na[, vars_na, drop = FALSE]))]
+  motifs_na <- apply(x_na[, vars_na, drop = FALSE], 1, function(r) paste(as.integer(r), collapse = ""))
+  motifs_na <- motifs_na[grepl("1", motifs_na)]
+  frequences_na <- sort(table(motifs_na), decreasing = TRUE)
+  haut_na <- frequences_na[seq_len(min(12, length(frequences_na)))]
+  output$combinaisons_resume <- renderText({
+    validate(need(length(motifs_na) > 0, "Aucune valeur manquante."))
+    paste0(length(haut_na), " combinaisons les plus fréquentes sur ", length(frequences_na),
+      " : elles couvrent ", pct_fr(100 * sum(haut_na) / length(motifs_na), 0),
+      " des observations avec au moins un NA.")
+  })
   output$combinaisons_na <- renderPlotly({
-    x <- is.na(donnees_uci[import_uci$colonnes])
-    vars <- colnames(x)[colSums(x) > 0]
-    vars <- vars[order(-colSums(x[, vars, drop = FALSE]))]
-    motifs <- apply(x[, vars, drop = FALSE], 1, function(r) paste(as.integer(r), collapse = ""))
-    motifs <- motifs[grepl("1", motifs)]
-    validate(need(length(motifs) > 0, "Aucune valeur manquante."))
-    frequences <- sort(table(motifs), decreasing = TRUE)
-    haut <- frequences[seq_len(min(12, length(frequences)))]
+    validate(need(length(motifs_na) > 0, "Aucune valeur manquante."))
+    x <- x_na; vars <- vars_na; haut <- haut_na
     n <- nrow(x)
     lignes <- paste0("#", seq_along(haut), " · ", as.integer(haut), " obs. (", pct_fr(100 * haut / n), ")")
     b <- do.call(rbind, lapply(seq_along(haut), function(k) {
@@ -181,14 +189,11 @@ function(input, output, session) {
     }))
     b$ligne <- factor(b$ligne, levels = rev(lignes))
     b$variable <- factor(b$variable, levels = unname(libelles[vars]))
-    titre <- paste0(length(haut), " combinaisons les plus fréquentes sur ", length(frequences),
-      " : elles couvrent ", pct_fr(100 * sum(haut) / length(motifs), 0), " des observations avec au moins un NA")
     p <- ggplot(b, aes(variable, ligne, fill = statut, text = texte)) +
       geom_tile(colour = "white", linewidth = 1.5) +
       scale_fill_manual(values = c("Manquante" = "#E88432", "Observée" = "#E2EBF6")) +
-      labs(x = NULL, y = NULL, title = titre) + theme_app(11) +
-      theme(panel.grid = element_blank(), axis.text.x = element_text(angle = 30, hjust = 1),
-            plot.title = element_text(size = 11, colour = couleur_discrete))
+      labs(x = NULL, y = NULL) + theme_app(11) +
+      theme(panel.grid = element_blank(), axis.text.x = element_text(angle = 30, hjust = 1))
     interactif(p)
   })
   output$na_global_ui <- renderPlotly({

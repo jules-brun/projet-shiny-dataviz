@@ -125,6 +125,7 @@ fluidPage(
       plotlyOutput("na_detail", height = "560px"),
       h4("Combinaisons de valeurs manquantes"),
       p("Chaque ligne représente une combinaison de variables manquantes (orange) et observées (gris clair), de la plus fréquente à la moins fréquente. L'effectif et la part de chaque combinaison sont indiqués à gauche et au survol."),
+      p(strong(textOutput("combinaisons_resume", inline = TRUE))),
       plotlyOutput("combinaisons_na", height = "560px"),
       p(class = "note", "Les variables sont triées selon leur proportion de NA ; seules celles qui en comportent sont affichées. Les pourcentages sont calculés sur toutes les observations nettoyées. La provenance est exclue de ce graphique."),
       h4("Nombre de mesures manquantes par observation"),

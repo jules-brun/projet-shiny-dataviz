@@ -59,6 +59,8 @@ habiller <- function(p, legende = TRUE) {
            hoverlabel = list(bgcolor = "white", bordercolor = "#B8D4FA",
                              font = list(size = 13, color = couleur_encre)),
            showlegend = legende,
+           # Marge haute réservée à la légende : aucun titre n'est placé dans les graphiques.
+           margin = list(t = if (legende) 60 else 20),
            legend = list(orientation = "h", x = 0, xanchor = "left", y = 1.02,
                          yanchor = "bottom", title = list(text = "")))
 }
