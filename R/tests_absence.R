@@ -205,31 +205,36 @@ synthese_ligne_absence <- function(analyse, x, libelles) {
 serveur_tests_absence <- function(input, output, session, analyse, dictionnaire, libelles_sources) {
   libelles <- c(setNames(dictionnaire$libelle, dictionnaire$nom_fr),
                 provenance = "Provenance", diagnostic = "Diagnostic binaire")
-  output$absence_matrice <- renderPlot({
+  # Matrice interactive : la cellule affiche la p-value ajustée, le survol détaille le test.
+  output$absence_matrice <- renderPlotly({
     d <- analyse$resultats
     validate(need(nrow(d) > 0, "Aucune variable explicative ne contient de NA dans ce périmètre."))
-    d$variable_absence <- factor(d$variable_absence, levels = rev(analyse$lignes))
-    d$variable_croisee <- factor(d$variable_croisee, levels = analyse$colonnes)
-    d$texte <- ifelse(d$statut == "Non applicable", "Non\napplicable",
-      ifelse(d$statut != "Calculé", "Non\ncalculable", formater_p_absence(d$p_ajustee)))
+    courts <- sub(" \\(.*\\)$", "", libelles)
+    d$variable_absence <- factor(courts[d$variable_absence], levels = rev(unname(courts[analyse$lignes])))
+    d$variable_croisee <- factor(courts[d$variable_croisee], levels = unname(courts[analyse$colonnes]))
+    d$etiquette <- ifelse(d$statut == "Calculé", formater_p_absence(d$p_ajustee), "")
     categories <- c("Association détectée (BH < 5 %)", "Non significatif (BH ≥ 5 %)",
                     "Non calculable", "Non applicable")
     d$affichage <- factor(d$affichage, levels = categories)
-    ggplot(d, aes(variable_croisee, variable_absence, fill = affichage)) +
-      geom_tile(colour = "white", linewidth = .6) +
-      geom_text(aes(label = texte, colour = affichage == categories[1]), size = 2.8, show.legend = FALSE) +
-      scale_color_manual(values = c("FALSE" = "#143052", "TRUE" = "white")) +
-      scale_fill_manual(values = setNames(c("#165DDE", "#EAF2FF", "#CBD5E1", "#F3F4F6"), categories), drop = FALSE) +
-      scale_x_discrete(labels = function(x) vapply(libelles[x], function(t) paste(strwrap(t, width = 23), collapse = "\n"), character(1)), drop = FALSE) +
-      scale_y_discrete(labels = libelles, drop = FALSE) +
-      labs(x = "Variable Y croisée (sur les observations où elle est renseignée)",
-        y = "Variable X dont on étudie l'absence", fill = NULL,
-        caption = paste(analyse$n_total, "observations nettoyées des quatre centres, sans imputation —",
-          analyse$n_tests_valides, "tests valides, correction BH globale. P-values Monte-Carlo estimées ; diagonale non testée.")) +
-      theme_minimal(base_size = 10) + theme(panel.grid = element_blank(),
-        axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom") +
-      guides(fill = guide_legend(nrow = 2))
-  }, res = 110)
+    d$survol <- paste0("<b>Absence de ", d$variable_absence, "</b><br>croisée avec ", d$variable_croisee,
+      "<br><b>", d$affichage, "</b>",
+      ifelse(d$statut == "Calculé", paste0(
+        "<br>p ajustée (BH) : ", formater_p_absence(d$p_ajustee),
+        " · p brute : ", formater_p_absence(d$p_brute),
+        "<br>Test : ", d$methode,
+        "<br>V de Cramér : ", formatC(d$v_cramer, format = "f", digits = 2, decimal.mark = ","),
+        "<br>", d$n_utilise, " observations (", d$n_x_manquantes, " avec X manquante)"),
+        ifelse(nzchar(d$raison), paste0("<br>", d$raison), "")))
+    p <- ggplot(d, aes(variable_croisee, variable_absence, fill = affichage, text = survol)) +
+      geom_tile(colour = "white", linewidth = 1.2) +
+      geom_text(aes(label = etiquette, colour = affichage == categories[1]), size = 2.9) +
+      scale_colour_manual(values = c("FALSE" = "#143052", "TRUE" = "white"), guide = "none") +
+      scale_fill_manual(values = setNames(c("#165DDE", "#DCE8FB", "#CBD5E1", "#F3F4F6"), categories), drop = FALSE) +
+      labs(x = NULL, y = NULL) + theme_app(10) +
+      theme(panel.grid = element_blank(), axis.text.x = element_text(angle = 35, hjust = 1))
+    interactif(p) |> layout(xaxis = list(side = "top", tickangle = -35),
+                            legend = list(y = -.02, yanchor = "top"))
+  })
   output$absence_conclusion <- renderText({
     d <- analyse$resultats
     associees <- unique(d$variable_absence[is.finite(d$p_ajustee) &

@@ -1,5 +1,7 @@
 # Interface Shiny — lancer depuis la racine avec shiny::runApp(".")
 library(shiny)
+library(plotly)
+source("R/graphiques.R", local = TRUE)
 source("R/visualisation.R", local = TRUE)
 
 fluidPage(
@@ -29,7 +31,7 @@ fluidPage(
     summary { cursor:pointer; color:var(--blue); font-weight:600; }
     .recit-matrice { overflow-x:auto; margin:16px 0; }
     .footer { color:var(--muted); font-size:12px; padding:24px 0; }
-    .shiny-plot-output { margin:20px 0; }
+    .shiny-plot-output,.plotly { margin:16px 0; }
     @media(max-width:767px) { .container-fluid { padding:16px; } h1 { font-size:28px; } .tab-content { padding:16px; } .nav-tabs>li>a { padding:10px 12px; } }
   "))),
   div(class = "hero",
@@ -40,12 +42,13 @@ fluidPage(
   tabsetPanel(
     tabPanel("1 · Données",
       selectInput("source_apercu", "Provenance", choices = c("Toutes" = "toutes")),
-      helpText("Ce filtre concerne uniquement cet onglet."),
-      h4("Effectifs par provenance"), plotOutput("effectifs", height = "300px"),
+      helpText("Ce filtre concerne uniquement cet onglet ; le centre choisi est mis en avant ci-dessous."),
+      h4("Effectifs par provenance et diagnostic"), plotlyOutput("effectifs", height = "320px"),
       h4("Distribution des variables cliniques"),
       selectInput("variable_apercu", "Variable", choices = NULL),
       uiOutput("dictionnaire"), textOutput("dimensions"),
-      plotOutput("apercu", height = "380px"),
+      plotlyOutput("apercu", height = "400px"),
+      p(class = "note", "Barres empilées par diagnostic ; les valeurs manquantes sont exclues. Survoler une barre affiche l'effectif et sa part dans la modalité ou la classe."),
       h4("Doublons : une occurrence conservée par paire"),
       div(class = "callout", textOutput("bilan_doublons")),
       p("Comparaison des 14 variables originales au sein de chaque provenance, avant recodage des zéros. La première occurrence est conservée. Les NA aux mêmes positions comptent comme identiques. Ce choix de dédoublonnage ne constitue pas une preuve d'identité du patient."),
@@ -78,13 +81,14 @@ fluidPage(
       ),
       h4("Pourcentage de NA par variable et provenance"),
       p("Chaque case indique la proportion de valeurs manquantes pour une variable dans un centre, après conversion des ? et recodage des zéros ciblés. Le dénominateur est l'effectif nettoyé de ce centre."),
-      plotOutput("na_detail", height = "630px"),
+      plotlyOutput("na_detail", height = "560px"),
       h4("Combinaisons de valeurs manquantes"),
-      p("À gauche, les barres indiquent la proportion de NA par variable. À droite, chaque ligne représente une combinaison de valeurs observées (bleu) et manquantes (orange) ; la barre associée indique sa fréquence."),
-      plotOutput("combinaisons_na", height = "760px"),
-      p(class = "note", "Les variables sont triées selon leur proportion de NA. Les combinaisons affichées comportent au moins une valeur manquante ; leurs fréquences sont calculées sur toutes les observations nettoyées. La provenance est exclue de ce graphique."),
+      p("Chaque ligne représente une combinaison de variables manquantes (orange) et observées (gris clair), de la plus fréquente à la moins fréquente. L'effectif et la part de chaque combinaison sont indiqués à gauche et au survol."),
+      plotlyOutput("combinaisons_na", height = "560px"),
+      p(class = "note", "Les variables sont triées selon leur proportion de NA ; seules celles qui en comportent sont affichées. Les pourcentages sont calculés sur toutes les observations nettoyées. La provenance est exclue de ce graphique."),
       h4("Nombre de mesures manquantes par observation"),
-      plotOutput("na_global_ui", height = "330px")
+      plotlyOutput("na_global_ui", height = "360px"),
+      p(class = "note", "Toutes les observations nettoyées sont incluses, y compris celles sans NA. Les couleurs indiquent le centre d'origine.")
     ),
     tabPanel("3 · Relations entre variables",
       p("Deux parcours de visualisation pour comparer les relations cliniques avec et sans imputation des valeurs manquantes."),
@@ -94,9 +98,11 @@ fluidPage(
       )
     ),
     tabPanel("4 · Comprendre les données manquantes",
+      p("Chaque ligne correspond à une variable dont on étudie l'absence (X), chaque colonne à une caractéristique croisée (Y), mesurée sur les observations où Y est renseignée. Les cellules indiquent la p-value ajustée par Benjamini-Hochberg ; le survol détaille le test, l'effectif et le V de Cramér."),
       div(class = "recit-matrice",
-        plotOutput("absence_matrice", width = "1400px", height = "650px")
+        plotlyOutput("absence_matrice", width = "100%", height = "620px")
       ),
+      p(class = "note", "Variables quantitatives découpées en tertiles. P-values Monte-Carlo estimées ; diagonale non testée ; aucune imputation."),
       h4("Conclusion"),
       div(class = "callout", textOutput("absence_conclusion"))
     )

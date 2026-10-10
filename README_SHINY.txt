@@ -3,7 +3,7 @@ SHINY — HEART DISEASE, VERSION NETTOYÉE
 Conserver ui.R, server.R et le dossier R/ ensemble.
 Garder dataset/ à la racine avec les quatre fichiers processed fournis.
 Depuis une session R ouverte à la racine :
-install.packages(c("shiny", "tidyverse", "VIM", "FactoMineR", "missMDA", "ggrepel"))
+install.packages(c("shiny", "tidyverse", "VIM", "FactoMineR", "missMDA", "ggrepel", "plotly"))
 shiny::runApp(".")
 
 Conserver R/_disable_autoload.R : ce fichier désactive le chargement automatique

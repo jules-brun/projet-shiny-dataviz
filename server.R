@@ -1,5 +1,5 @@
 # Serveur Shiny — dépend de R/import.R et des quatre fichiers processed.
-# Packages à installer une fois : install.packages(c("shiny", "tidyverse", "VIM", "FactoMineR", "missMDA", "ggrepel"))
+# Packages à installer une fois : install.packages(c("shiny", "tidyverse", "VIM", "FactoMineR", "missMDA", "ggrepel", "plotly"))
 library(shiny)
 library(ggplot2)
 library(tidyverse)
@@ -35,7 +35,9 @@ libelles_sources <- c(cleveland = "Cleveland", hungarian = "Hongrie",
 
 # Référence propre au quatrième onglet, avec un identifiant de ligne source stable.
 source("R/gestion_na.R", local = TRUE)
+source("R/graphiques.R", local = TRUE)
 source("R/visualisation.R", local = TRUE)
+libelles <- setNames(import_uci$dictionnaire$libelle, import_uci$colonnes)
 dictionnaire_na <- creer_dictionnaire_na(import_uci$dictionnaire, variables_categorielles)
 reference_na <- new.env(parent = emptyenv())
 reference_na$donnees <- donnees_uci
@@ -88,36 +90,59 @@ function(input, output, session) {
   updateSelectInput(session, "variable_apercu",
     choices = setNames(import_uci$colonnes, import_uci$dictionnaire$libelle),
     selected = "age")
-  output$apercu <- renderPlot({
+  # Distribution empilée par diagnostic : la répartition se lit au survol de chaque barre.
+  output$apercu <- renderPlotly({
     req(input$variable_apercu %in% import_uci$colonnes)
     variable <- input$variable_apercu
-    d <- data.frame(valeur = apercu()[[variable]])
-    d <- d[!is.na(d$valeur), , drop = FALSE]
+    a <- apercu()
+    d <- data.frame(valeur = a[[variable]],
+      diagnostic = factor(a$diagnostic, levels = 0:1, labels = names(couleurs_diagnostic)))
+    d <- d[!is.na(d$valeur) & !is.na(d$diagnostic), , drop = FALSE]
     validate(need(nrow(d) > 0, "Aucune valeur observée pour cette variable dans ce centre."))
-    libelle <- import_uci$dictionnaire$libelle[match(variable, import_uci$colonnes)]
     if (variable %in% c(variables_categorielles, "diagnostic")) {
-      d$valeur <- factor(d$valeur)
-      if (variable == "diagnostic")
-        d$valeur <- factor(d$valeur, levels = c("0", "1"),
-                          labels = c("Absence", "Présence"))
-      ggplot(d, aes(valeur)) + geom_bar(fill = "#165DDE", width = .65) +
-        labs(x = libelle, y = "Observations", caption = "Valeurs manquantes exclues. Les catégories cliniques suivent les codes UCI.") +
-        theme_minimal(base_size = 12)
+      b <- as.data.frame(table(x = libeller_modalites(d$valeur, variable), diagnostic = d$diagnostic))
+      b <- b[b$Freq > 0, ]
+      b$total <- ave(b$Freq, b$x, FUN = sum)
+      b$texte <- paste0("<b>", b$x, "</b><br>", b$diagnostic, " : ", b$Freq, " obs. (",
+                        pct_fr(100 * b$Freq / b$total), " de la modalité)")
+      p <- ggplot(b, aes(x, Freq, fill = diagnostic, text = texte)) +
+        geom_col(width = .6, colour = "white", linewidth = .4)
     } else {
-      ggplot(d, aes(valeur)) + geom_histogram(bins = 25, fill = "#165DDE", color = "white") +
-        labs(x = libelle, y = "Observations", caption = "Valeurs manquantes exclues.") +
-        theme_minimal(base_size = 12)
+      bornes <- pretty(range(d$valeur), n = 25)
+      classe <- cut(d$valeur, bornes, include.lowest = TRUE, right = FALSE)
+      b <- as.data.frame(table(classe = classe, diagnostic = d$diagnostic))
+      i <- as.integer(b$classe)
+      b$milieu <- (bornes[i] + bornes[i + 1]) / 2
+      b <- b[b$Freq > 0, ]
+      b$texte <- paste0("<b>[", bornes[as.integer(b$classe)], " ; ", bornes[as.integer(b$classe) + 1],
+                        "[</b><br>", b$diagnostic, " : ", b$Freq, " obs.")
+      p <- ggplot(b, aes(milieu, Freq, fill = diagnostic, text = texte)) +
+        geom_col(width = diff(bornes)[1] * .92, colour = "white", linewidth = .2)
     }
-  }, res = 110)
-  output$effectifs <- renderPlot({
-    d <- as.data.frame(table(factor(apercu()$provenance, levels = names(libelles_sources))))
-    names(d) <- c("provenance", "n")
-    ggplot(d, aes(provenance, n)) + geom_col(fill = "#165DDE", width = .6) +
-      geom_text(aes(label = n), vjust = -.4) +
-      scale_x_discrete(labels = libelles_sources) +
-      scale_y_continuous(expand = expansion(mult = c(0, .15))) +
-      labs(x = NULL, y = "Observations après nettoyage") + theme_minimal(base_size = 12)
-  }, res = 110)
+    p <- p + scale_fill_manual(values = couleurs_diagnostic, drop = FALSE) +
+      labs(x = libelles[[variable]], y = "Observations") + theme_app()
+    interactif(p)
+  })
+  # Toujours les quatre centres : le centre filtré est mis en avant, pas isolé.
+  output$effectifs <- renderPlotly({
+    b <- as.data.frame(table(
+      centre = factor(libelles_sources[donnees_uci$provenance], levels = libelles_sources),
+      diagnostic = factor(donnees_uci$diagnostic, levels = 0:1, labels = names(couleurs_diagnostic))))
+    b$total <- ave(b$Freq, b$centre, FUN = sum)
+    choisi <- input$source_apercu %||% "toutes"
+    b$opacite <- if (choisi == "toutes") 1 else ifelse(b$centre == libelles_sources[[choisi]], 1, .25)
+    b$texte <- paste0("<b>", b$centre, "</b> · ", b$total, " observations<br>", b$diagnostic, " : ",
+                      b$Freq, " (", pct_fr(100 * b$Freq / b$total), ")")
+    totaux <- unique(b[c("centre", "total", "opacite")])
+    p <- ggplot(b, aes(centre, Freq, fill = diagnostic, alpha = opacite, text = texte)) +
+      geom_col(width = .55, colour = "white", linewidth = .4) +
+      geom_text(data = totaux, aes(centre, total + max(total) * .06, label = total),
+                inherit.aes = FALSE, colour = couleur_encre, size = 4) +
+      scale_alpha_identity() + scale_fill_manual(values = couleurs_diagnostic) +
+      labs(x = NULL, y = "Observations après nettoyage") + theme_app() +
+      theme(panel.grid.major.x = element_blank())
+    interactif(p)
+  })
   output$dictionnaire <- renderUI({
     req(input$variable_apercu %in% import_uci$colonnes)
     d <- import_uci$dictionnaire
@@ -138,28 +163,70 @@ function(input, output, session) {
           " → ligne source retirée : ", paste(retires, collapse = ", ")))
     }))
   })
-  output$combinaisons_na <- renderPlot({
-    validate(need(requireNamespace("VIM", quietly = TRUE),
-      'Installer VIM pour afficher ce graphique : install.packages("VIM")'))
-    ancien_par <- par(las = 2)
-    on.exit(par(ancien_par))
-    VIM::aggr(donnees_uci[import_uci$colonnes],
-      col = c("#B8D4FA", "#E88432"),
-      only.miss = TRUE, sortVars = TRUE, sortCombs = TRUE,
-      numbers = FALSE, prop = TRUE, cex.axis = .75,
-      ylabs = c("Proportion de NA", "Fréquence des combinaisons"))
-  }, res = 110)
-  output$na_global_ui <- renderPlot({
-    d <- data.frame(nb_na = rowSums(is.na(donnees_uci[import_uci$colonnes])))
-    ggplot(d, aes(nb_na)) + geom_bar(fill = "#165DDE", width = .7) +
+  # Une ligne par combinaison de NA (les plus fréquentes), une colonne par variable concernée.
+  output$combinaisons_na <- renderPlotly({
+    x <- is.na(donnees_uci[import_uci$colonnes])
+    vars <- colnames(x)[colSums(x) > 0]
+    vars <- vars[order(-colSums(x[, vars, drop = FALSE]))]
+    motifs <- apply(x[, vars, drop = FALSE], 1, function(r) paste(as.integer(r), collapse = ""))
+    motifs <- motifs[grepl("1", motifs)]
+    validate(need(length(motifs) > 0, "Aucune valeur manquante."))
+    frequences <- sort(table(motifs), decreasing = TRUE)
+    haut <- frequences[seq_len(min(12, length(frequences)))]
+    n <- nrow(x)
+    lignes <- paste0("#", seq_along(haut), " · ", as.integer(haut), " obs. (", pct_fr(100 * haut / n), ")")
+    b <- do.call(rbind, lapply(seq_along(haut), function(k) {
+      m <- as.integer(strsplit(names(haut)[k], "")[[1]])
+      data.frame(ligne = lignes[k], variable = unname(libelles[vars]),
+        statut = ifelse(m == 1, "Manquante", "Observée"),
+        texte = paste0("<b>Combinaison ", k, "</b> : ", as.integer(haut[k]), " observations (",
+          pct_fr(100 * haut[k] / n), ")<br>Manquantes : ", paste(libelles[vars][m == 1], collapse = ", ")))
+    }))
+    b$ligne <- factor(b$ligne, levels = rev(lignes))
+    b$variable <- factor(b$variable, levels = unname(libelles[vars]))
+    titre <- paste0(length(haut), " combinaisons les plus fréquentes sur ", length(frequences),
+      " : elles couvrent ", pct_fr(100 * sum(haut) / length(motifs), 0), " des observations avec au moins un NA")
+    p <- ggplot(b, aes(variable, ligne, fill = statut, text = texte)) +
+      geom_tile(colour = "white", linewidth = 1.5) +
+      scale_fill_manual(values = c("Manquante" = "#E88432", "Observée" = "#E2EBF6")) +
+      labs(x = NULL, y = NULL, title = titre) + theme_app(11) +
+      theme(panel.grid = element_blank(), axis.text.x = element_text(angle = 30, hjust = 1),
+            plot.title = element_text(size = 11, colour = couleur_discrete))
+    interactif(p)
+  })
+  output$na_global_ui <- renderPlotly({
+    b <- as.data.frame(table(
+      nb_na = rowSums(is.na(donnees_uci[import_uci$colonnes])),
+      centre = factor(libelles_sources[donnees_uci$provenance], levels = libelles_sources)))
+    b$nb_na <- as.integer(as.character(b$nb_na))
+    b <- b[b$Freq > 0, ]
+    b$total <- ave(b$Freq, b$nb_na, FUN = sum)
+    b$texte <- paste0("<b>", b$nb_na, " mesure(s) manquante(s)</b> · ", b$total, " obs.<br>",
+                      b$centre, " : ", b$Freq)
+    p <- ggplot(b, aes(nb_na, Freq, fill = centre, text = texte)) +
+      geom_col(width = .7, colour = "white", linewidth = .3) +
+      scale_fill_manual(values = couleurs_centres) +
       scale_x_continuous(breaks = 0:length(import_uci$colonnes)) +
-      labs(x = "Nombre de mesures manquantes sur 14", y = "Observations",
-           caption = "Toutes les observations nettoyées sont incluses, y compris celles sans NA.") +
-      theme_minimal(base_size = 12)
-  }, res = 110)
-  output$na_detail <- renderPlot({ import_uci$graphique_na_provenance() }, res = 110)
+      labs(x = "Nombre de mesures manquantes par observation (sur 14)", y = "Observations") +
+      theme_app() + theme(panel.grid.major.x = element_blank())
+    interactif(p)
+  })
+  output$na_detail <- renderPlotly({
+    d <- import_uci$na_par_provenance
+    d$variable <- factor(libelles[d$variable], levels = rev(unname(libelles[import_uci$colonnes])))
+    d$centre <- factor(libelles_sources[d$provenance], levels = libelles_sources)
+    d$texte <- paste0("<b>", d$variable, "</b> · ", d$centre, "<br>", d$n_na, " NA sur ",
+                      d$n_observations, " (", pct_fr(d$pct_na), ")")
+    d$etiquette <- ifelse(d$n_na > 0, pct_fr(d$pct_na, 0), "")
+    p <- ggplot(d, aes(centre, variable, fill = pct_na, text = texte)) +
+      geom_tile(colour = "white", linewidth = 1.5) +
+      geom_text(aes(label = etiquette, colour = pct_na >= 50), size = 3.5) +
+      scale_colour_manual(values = c("FALSE" = couleur_encre, "TRUE" = "white"), guide = "none") +
+      scale_fill_gradient(low = "#F1F5FB", high = "#08306B", limits = c(0, 100), name = "% de NA") +
+      labs(x = NULL, y = NULL) + theme_app() + theme(panel.grid = element_blank())
+    interactif(p, legende = FALSE) |> hide_colorbar()
+  })
 
-  libelles <- setNames(import_uci$dictionnaire$libelle, import_uci$colonnes)
   parcours_serveur("complets", donnees_uci, import_uci$colonnes,
     variables_categorielles, libelles, libelles_sources)
   parcours_serveur("imputes", donnees_uci, import_uci$colonnes,
