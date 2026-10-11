@@ -32,6 +32,7 @@ calculer_acm_conditionnelle <- function(donnees, categories = variables_acm_app,
   variables <- setdiff(variables, exclues); x <- x[variables]
   if (length(variables) < 2L) stop("Au moins deux variables qualitatives non constantes sont nécessaires.")
   masque <- is.na(d[variables])
+  rownames(masque) <- rownames(d)
   xi <- x; auxiliaires <- character()
   provenance <- droplevels(factor(d$provenance))
   if (mode != "complets" && nlevels(provenance) > 1L) {
@@ -113,10 +114,7 @@ acm_texte_resultat <- function(res, axes = c(1L, 2L)) {
     res$n_total - res$n, "observations exclues sur les seules variables actives.")
   if (!is.null(res$ncp) && !is.na(res$ncp)) texte <- paste(texte,
     "Rang d’imputation sélectionné par validation croisée :", res$ncp, ".")
-  points <- if (isTRUE(res$individus_reference)) {
-    z <- res$reference_modalites
-    data.frame(id = rownames(z), x = z[, axes[1]], y = z[, axes[2]])
-  } else aggregate(cbind(x, y) ~ id, nuage_acm_app(res, "modalites", axes), mean)
+  points <- points_acm_app(res, "modalites", axes)
   if ("diagnostic : 1" %in% points$id) {
     actifs <- !grepl("^(diagnostic|provenance) : ", points$id)
     pos <- points[points$id == "diagnostic : 1", c("x", "y")]

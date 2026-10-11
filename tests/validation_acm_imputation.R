@@ -45,9 +45,27 @@ for (r in list(cc, si, mi)) for (vue in c("individus", "modalites")) {
   g <- graphe_acm_app(r, vue, c(2L, 3L), TRUE)
   stopifnot(identical(g$theme$plot.background$fill, palette_heart$card))
   invisible(ggplot2::ggplot_build(g))
+  if (vue == "modalites" && r$m >= 3L) {
+    # Véritable MIMCA : centroïdes identiques aux points sur des axes autres que 1/2.
+    contours <- Filter(function(l) inherits(l$geom, "GeomPath"), g$layers)[[1]]$data
+    points <- Filter(function(l) inherits(l$geom, "GeomPoint"), g$layers)[[1]]$data
+    for (id in unique(contours$id)) {
+      z <- contours[contours$id == id, c("x", "y")]
+      p <- points[points$id == id, c("x", "y")]
+      stopifnot(max(abs(colMeans(z[-nrow(z), ]) - as.numeric(p))) < 1e-10)
+    }
+  }
   if (vue == "individus") stopifnot(!any(vapply(g$layers,
     function(l) inherits(l$geom, "GeomPath"), logical(1))))
 }
+# Contrôle de la transition barycentrique et de la projection dans le même
+# repère, en comparant directement aux coordonnées calculées par FactoMineR.
+sup <- rownames(si$ref$quali.sup$coord)
+sup_ids <- paste0(ifelse(sup %in% levels(si$diagnostic), "diagnostic : ", "provenance : "), sup)
+act <- rownames(si$ref$var$coord)
+stopifnot(max(abs(si$reference_modalites[act, ] - si$ref$var$coord)) < 1e-8,
+  max(abs(si$reference_modalites[sup_ids, ] - si$ref$quali.sup$coord)) < 1e-8,
+  max(abs(predict(si$ref, newdata = si$ref$call$X[si$variables])$coord - si$ref$ind$coord)) < 1e-8)
 stopifnot(grepl("plan factoriel affiché", acm_texte_resultat(mi, c(2, 3)), fixed = TRUE))
 # Clé de cache / lecture RDS / changement de configuration.
 dossier <- tempfile("cache_acm_"); dir.create(dossier)

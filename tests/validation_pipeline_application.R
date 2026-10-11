@@ -42,6 +42,9 @@ for (jeu in c(list(imp$simple), imp$jeux)) {
   }
 }
 a <- calculer_acm_app(imp)
+desaligne <- imp
+desaligne$jeux[[1]] <- imp$jeux[[1]][rev(seq_len(nrow(original))), ]
+stopifnot(inherits(try(calculer_acm_app(desaligne), silent = TRUE), "try-error"))
 stopifnot(nrow(a$ref$ind$coord) == nrow(original),
   all(c("diagnostic", "provenance") %in% names(a$ref$call$X)),
   length(a$individus) == 5, ncol(a$individus[[1]]) > 2,
@@ -73,6 +76,16 @@ shiny::testServer(serveur, {
   for (nom in c("acm_valeurs_propres", "acm_modalites", "acm_individus"))
     stopifnot(!is.null(output[[nom]]))
   stopifnot(grepl("ACM disponible", output$statut_imputation))
+  # Régression : le mode choisi doit conserver les projections des cinq jeux
+  # et la case doit publier des contours réellement calculables.
+  session$setInputs(acm_mode = "modeles", acm_lourdes = TRUE, acm_nboot = 20,
+    calculer_acm = 1, ellipses_acm = TRUE)
+  stopifnot(is.null(erreur_acm()), !isTRUE(acm_resultat()$individus_reference),
+    length(acm_resultat()$individus) == 5L,
+    grepl("Contours de la couleur des points", output$statut_ellipses, fixed = TRUE))
+  contours <- bilan_ellipses_acm(acm_resultat(), axes(), 10L)
+  stopifnot(contours$individus[["affichees"]] == 10L,
+    contours$modalites[["affichees"]] > 0L)
   session$setInputs(modele_cholesterol = "median")
   stopifnot(grepl("recalculer", output$statut_imputation))
 })

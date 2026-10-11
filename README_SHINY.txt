@@ -99,8 +99,10 @@ MIMCA : 20 jeux en développement, 50 ou 100 pour l’analyse finale. Réglage i
 modifiable avant le lancement : options(heart.acm.nboot = 100L).
 Chaque jeu est projeté sur la même ACM de référence, sur tous les axes disponibles.
 Les modalités sont projetées par leurs barycentres divisés par la racine de la
-valeur propre. Les points des trois stratégies factorielles sont ceux du jeu
-de référence ; les ellipses décrivent la dispersion des projections multiples.
+valeur propre. Les points des modalités sont les positions moyennes des jeux
+projetés ; les ellipses sont centrées sur ces mêmes points et décrivent la
+dispersion des projections multiples, y compris pour MIMCA. Le texte de proximité
+au diagnostic utilise ces mêmes positions affichées.
 La vue individus de ces stratégies reste celle de référence, sans ellipse
 individuelle. Les positions moyennes et ellipses individuelles historiques des
 modèles choisis restent disponibles car leurs projections sont réellement calculées.
@@ -109,7 +111,15 @@ Ellipses de variabilité liée aux imputations multiples : petite ellipse = faib
 sensibilité de la position ; grande ellipse = plus forte dépendance à l’imputation.
 Contours descriptifs de covariance avec rayon gaussien théorique à 95 % ; aucune
 garantie de couverture empirique et aucun intervalle de confiance du centre.
-Les points invariants n’ont pas d’ellipse. Les proximités au diagnostic 1 sont
+Chaque contour partage la couleur de son point : variable pour les modalités,
+diagnostic pour les individus. Les jeux, le masque de NA et les variables
+supplémentaires sont contrôlés pour éviter les désalignements de lignes.
+La limite individuelle est appliquée après exclusion
+des positions invariantes, avec les dispersions les plus fortes en priorité.
+Un compteur indique les contours disponibles et affichés sur le plan choisi.
+Une covariance de rang un produit un segment ; les points invariants n’ont pas
+d’ellipse. Si une autre stratégie est encore affichée, appliquer les modèles
+choisis avec Calculer l’ACM. Les proximités au diagnostic 1 sont
 calculées sur le plan affiché, descriptives et ne constituent pas des tests
 d’association. Les plans des stratégies sont distincts, sans alignement entre eux.
 Les libellés UCI sont centralisés dans R/graphiques.R ; diagnostic reste 0/1.

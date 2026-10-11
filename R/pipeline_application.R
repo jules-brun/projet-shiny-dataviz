@@ -78,8 +78,10 @@ calculer_imputations_app <- function(d, selections, benchmark, m = 20L, seed = 2
     progression(i, m)
     imputer_jeu_app(d, selections, benchmark, bootstrap = TRUE, seed = seed + i)
   })
+  masque <- is.na(d[variables_acm_app])
+  rownames(masque) <- rownames(d)
   list(simple = simple, jeux = jeux, selections = selections, m = m, seed = seed,
-       masque = is.na(d[variables_acm_app]))
+       masque = masque)
 }
 
 tableau_acm_app <- function(d, niveaux = NULL, variables = variables_acm_app) {
@@ -94,6 +96,12 @@ tableau_acm_app <- function(d, niveaux = NULL, variables = variables_acm_app) {
 calculer_acm_app <- function(imputations, variables = variables_acm_app,
                              individus_reference = FALSE) {
   d <- imputations$simple
+  if (!length(imputations$jeux) || length(imputations$jeux) != imputations$m)
+    stop("Le nombre de jeux imputés ne correspond pas au nombre annoncé.")
+  if (nrow(imputations$masque) != nrow(d) ||
+      (!is.null(rownames(imputations$masque)) &&
+       !identical(rownames(imputations$masque), rownames(d))))
+    stop("Masque de NA mal aligné avec les individus.")
   x <- tableau_acm_app(d, variables = variables)
   if (anyNA(d[variables])) stop("L’ACM nécessite des variables actives complétées.")
   variables <- names(x)[vapply(x, nlevels, integer(1)) > 1L]
@@ -112,7 +120,9 @@ calculer_acm_app <- function(imputations, variables = variables_acm_app,
   if (ncol(ref$ind$coord) < 2L) stop("Deux dimensions exploitables sont nécessaires.")
   # Même repère pour chaque jeu ; les lignes et les modalités restent alignées.
   coords <- lapply(imputations$jeux, function(j) {
-    if (nrow(j) != nrow(d)) stop("Jeu imputé mal aligné.")
+    if (nrow(j) != nrow(d) || !identical(rownames(j), rownames(d)) ||
+        !identical(j$diagnostic, d$diagnostic) || !identical(j$provenance, d$provenance))
+      stop("Jeu imputé mal aligné avec les individus ou leurs variables supplémentaires.")
     xm <- tableau_acm_app(j, niveaux, variables)
     if (anyNA(xm)) stop("Modalités manquantes ou inconnues dans un jeu imputé.")
     as.matrix(predict(ref, newdata = xm)$coord)
@@ -146,8 +156,8 @@ calculer_acm_app <- function(imputations, variables = variables_acm_app,
 
 ellipses_app <- function(nuage, limite = Inf) {
   groupes <- split(nuage, factor(nuage$id, levels = unique(nuage$id)))
-  groupes <- head(groupes, limite)
   sorties <- lapply(groupes, function(z) {
+    if (nrow(z) < 3L || any(!is.finite(as.matrix(z[c("x", "y")])))) return(NULL)
     centre <- colMeans(z[c("x", "y")])
     s <- cov(z[c("x", "y")])
     if (any(!is.finite(s))) return(NULL)
@@ -158,6 +168,12 @@ ellipses_app <- function(nuage, limite = Inf) {
     a <- sqrt(qchisq(.95, 2)) * e$vectors %*% diag(sqrt(pmax(e$values, 0)), 2) %*% cercle
     data.frame(id = z$id[1], x = a[1, ] + centre[1], y = a[2, ] + centre[2])
   })
+  # La limite porte sur les contours non nuls, pas les premiers patients du fichier.
+  sorties <- Filter(Negate(is.null), sorties)
+  if (!length(sorties)) return(NULL)
+  # Afficher d'abord les positions les plus sensibles à l'imputation sur ce plan.
+  dispersion <- vapply(sorties, function(z) sum(apply(z[c("x", "y")], 2, var)), numeric(1))
+  sorties <- head(sorties[order(-dispersion)], limite)
   do.call(rbind, sorties)
 }
 
@@ -170,35 +186,62 @@ nuage_acm_app <- function(res, vue, axes) {
   }))
 }
 
+# Le point et son contour partagent le même centre dans le repère de référence.
+# Pour la vue individus de référence, le nuage contient simplement un seul jeu.
+points_acm_app <- function(res, vue, axes) {
+  aggregate(cbind(x, y) ~ id, nuage_acm_app(res, vue, axes), mean)
+}
+
+bilan_ellipses_acm <- function(res, axes, limite = 60L) {
+  par_vue <- function(vue) {
+    if (res$m < 3L || (vue == "individus" && isTRUE(res$individus_reference)))
+      return(c(disponibles = 0L, affichees = 0L))
+    nuage <- nuage_acm_app(res, vue, axes)
+    if (vue == "individus") nuage <- nuage[nuage$id %in% as.character(which(res$impute)), ]
+    toutes <- ellipses_app(nuage)
+    n <- length(unique(toutes$id))
+    c(disponibles = n, affichees = if (vue == "individus") min(n, limite) else n)
+  }
+  list(modalites = par_vue("modalites"), individus = par_vue("individus"))
+}
+
 graphe_acm_app <- function(res, vue, axes = c(1L, 2L), ellipses = FALSE, limite = 60L) {
   stopifnot(length(unique(axes)) == 2, all(axes >= 1), all(axes <= ncol(res$individus[[1]])))
   nuage <- nuage_acm_app(res, vue, axes)
-  points <- if (isTRUE(res$individus_reference) && vue == "modalites") {
-    z <- res$reference_modalites
-    data.frame(id = rownames(z), x = z[, axes[1]], y = z[, axes[2]])
-  } else aggregate(cbind(x, y) ~ id, nuage, mean)
+  points <- points_acm_app(res, vue, axes)
+  if (vue == "individus") points$diagnostic <- res$diagnostic[as.integer(points$id)] else
+    points$variable <- sub(" :.*$", "", points$id)
   g <- ggplot2::ggplot() +
     ggplot2::geom_hline(yintercept = 0, colour = palette_heart$line) +
     ggplot2::geom_vline(xintercept = 0, colour = palette_heart$line)
   if (ellipses && !(vue == "individus" && isTRUE(res$individus_reference)) && res$m >= 3L) {
     candidats <- if (vue == "individus") nuage[nuage$id %in% as.character(which(res$impute)), ] else nuage
     e <- ellipses_app(candidats, if (vue == "individus") limite else Inf)
-    if (!is.null(e)) g <- g + ggplot2::geom_path(data = e, ggplot2::aes(x, y, group = id),
-                                               colour = palette_heart$muted, alpha = .45, linewidth = .4)
+    if (!is.null(e)) {
+      if (vue == "individus") {
+        e$diagnostic <- res$diagnostic[as.integer(e$id)]
+        g <- g + ggplot2::geom_path(data = e, ggplot2::aes(x, y, group = id, colour = diagnostic),
+          alpha = .8, linewidth = .7, show.legend = FALSE)
+      } else {
+        e$variable <- sub(" :.*$", "", e$id)
+        g <- g + ggplot2::geom_path(data = e, ggplot2::aes(x, y, group = id, colour = variable),
+          linewidth = .7, show.legend = FALSE)
+      }
+    }
   }
   if (vue == "individus") {
-    points$diagnostic <- res$diagnostic[as.integer(points$id)]
-    g <- g + ggplot2::geom_point(data = points, ggplot2::aes(x, y, colour = diagnostic), alpha = .55) +
+    g <- g + ggplot2::geom_point(data = points, ggplot2::aes(x, y, colour = diagnostic), alpha = .8) +
       ggplot2::scale_colour_manual(values = c("0" = palette_heart$blue, "1" = palette_heart$red),
                                    drop = FALSE, name = "Diagnostic")
   } else {
-    points$variable <- sub(" :.*$", "", points$id)
     titres_variables <- libelles_variables_acm
-    points$libelle <- libeller_points_acm(points$id)
+    points$libelle <- sub(" : ", " :\n", libeller_points_acm(points$id), fixed = TRUE)
     g <- g + ggplot2::geom_point(data = points, ggplot2::aes(x, y, colour = variable,
       shape = variable %in% c("diagnostic", "provenance")), size = 3) +
       ggrepel::geom_text_repel(data = points, ggplot2::aes(x, y, label = libelle, colour = variable),
-        seed = 42, max.overlaps = Inf, size = 3.7, show.legend = FALSE) +
+        seed = 42, max.overlaps = Inf, size = 3.5, box.padding = .6, point.padding = .3,
+        force = 5, force_pull = .1, max.time = 2, max.iter = 100000, min.segment.length = 0,
+        segment.alpha = .7, show.legend = FALSE) +
       ggplot2::scale_shape_manual(values = c("FALSE" = 16, "TRUE" = 18), guide = "none") +
       ggplot2::scale_colour_discrete(labels = titres_variables) +
       ggplot2::labs(colour = "Variable")
@@ -207,7 +250,8 @@ graphe_acm_app <- function(res, vue, axes = c(1L, 2L), ellipses = FALSE, limite 
   g + ggplot2::labs(x = titres[1], y = titres[2],
     caption = if (isTRUE(res$individus_reference)) {
       if (vue == "individus") "Positions du jeu de référence ; aucune variabilité individuelle représentée."
-      else paste0("Positions de référence · ", res$m, " jeu(x) · Diagnostic et provenance supplémentaires",
+      else paste0("Points : positions moyennes de ", res$m, " jeu(x) projeté(s) dans le repère de référence",
+        "\nDiagnostic et provenance supplémentaires",
         if (ellipses && res$m >= 3L) "\nEllipses de variabilité liée aux imputations multiples ; contours descriptifs." else "")
     } else paste0(res$m, " jeux imputés · Points : positions moyennes · Diagnostic et provenance supplémentaires",
       if (ellipses) "\nEllipses de variabilité d’imputation ; contours descriptifs." else "")) +

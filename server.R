@@ -235,6 +235,23 @@ function(input, output, session) {
     a
   })
   output$acm_resume <- renderText(acm_texte_resultat(acm_resultat(), axes()))
+  output$statut_ellipses <- renderText({
+    if (!isTRUE(input$ellipses_acm)) return("")
+    res <- acm_resultat()
+    if (res$m < 3L) return("Aucune ellipse : le résultat affiché comporte moins de trois jeux. Calculer des imputations multiples, puis appliquer la stratégie souhaitée avec Calculer l’ACM.")
+    limite <- if (is.null(input$limite_ellipses)) 60L else as.integer(input$limite_ellipses)
+    req(is.finite(limite), limite > 0L)
+    b <- bilan_ellipses_acm(res, axes(), limite)
+    paste(if (identical(input$acm_mode, "modeles") && isTRUE(res$individus_reference))
+        "Le graphe affiche encore une stratégie de référence : cliquer sur Calculer l’ACM pour appliquer les modèles choisis." else "",
+      "Contours de la couleur des points :", b$modalites[["affichees"]], "ellipses de modalités ;",
+      if (isTRUE(res$individus_reference)) "vue individus de référence, sans ellipse individuelle." else
+        paste(b$individus[["affichees"]], "ellipses individuelles affichées sur",
+              b$individus[["disponibles"]], "positions variables (les plus dispersées en priorité)."),
+      if (!b$modalites[["disponibles"]] && !b$individus[["disponibles"]])
+        "Les positions sont invariantes sur le plan choisi : aucune ellipse non nulle à tracer." else "",
+      "Une dispersion sur un seul axe produit un segment ; les positions identiques restent des points.")
+  })
   output$acm_valeurs_propres <- renderPlot({
     r <- acm_resultat()
     z <- data.frame(dimension = seq_len(nrow(r$ref$eig)), valeur = r$ref$eig[, 1], pct = r$ref$eig[, 2])
