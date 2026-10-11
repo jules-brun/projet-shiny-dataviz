@@ -1,170 +1,254 @@
-# Serveur Shiny — dépend de R/import.R et des quatre fichiers processed.
-# Packages à installer une fois : install.packages(c("shiny", "tidyverse", "VIM", "FactoMineR", "missMDA", "ggrepel"))
 library(shiny)
 library(ggplot2)
-library(tidyverse)
+source("R/design.R", local = TRUE)
+source("R/benchmark_imputation.R", local = TRUE)
+source("R/pipeline_application.R", local = TRUE)
+source("R/pedagogie_na.R", local = TRUE)
+source("R/ml_evaluation.R", local = TRUE)
+source("R/ml_interface.R", local = TRUE)
 
-# Chargement une fois au démarrage, dans un environnement séparé.
-# import.R peut imprimer un graphique : un périphérique temporaire sans fichier
-# évite de créer Rplots.pdf. Les graphiques affichés dans Shiny sont rendus plus bas.
 charger_import <- function() {
-  if (!file.exists("R/import.R")) stop("R/import.R introuvable à la racine de l'application.")
   env <- new.env(parent = globalenv())
   grDevices::pdf(file = NULL)
   appareil <- grDevices::dev.cur()
   on.exit(grDevices::dev.off(appareil), add = TRUE)
-  sys.source("R/import.R", envir = env)
+  invisible(capture.output(sys.source("R/import.R", envir = env)))
   env
 }
 import_uci <- charger_import()
-
-# Copie pour l'application : préserver les objets produits par import.R.
 donnees_uci <- import_uci$heart
-if (!"diagnostic_initial" %in% names(donnees_uci)) {
-  donnees_uci$diagnostic_initial <- donnees_uci$diagnostic
-}
-stopifnot(all(is.na(donnees_uci$diagnostic_initial) |
-                donnees_uci$diagnostic_initial %in% 0:4))
-donnees_uci$diagnostic <- ifelse(is.na(donnees_uci$diagnostic_initial),
-                                NA_integer_, as.integer(donnees_uci$diagnostic_initial > 0))
-
-variables_categorielles <- c("sexe", "type_doul_thor", "glyc_jeun_elevee",
-  "ecg_repos", "angine_effort", "pente_st", "test_thallium", "nb_vaisseaux")
-libelles_sources <- c(cleveland = "Cleveland", hungarian = "Hongrie",
-                       switzerland = "Suisse", va = "VA Long Beach")
-
-# Référence propre au quatrième onglet, avec un identifiant de ligne source stable.
-source("R/gestion_na.R", local = TRUE)
-source("R/visualisation.R", local = TRUE)
-dictionnaire_na <- creer_dictionnaire_na(import_uci$dictionnaire, variables_categorielles)
-reference_na <- new.env(parent = emptyenv())
-reference_na$donnees <- donnees_uci
-reference_na$donnees$id_ligne <- with(import_uci$details[!import_uci$retirer, ],
-  paste(provenance, ligne_source, sep = ":"))
-lockBinding("donnees", reference_na)
-source("R/tests_absence.R", local = TRUE)
-# Un seul balayage sur la référence nettoyée, partagé entre les sessions.
-associations_absence <- analyser_absences(reference_na$donnees, dictionnaire_na)
+donnees_uci$diagnostic_initial <- donnees_uci$diagnostic
+donnees_uci$diagnostic <- ifelse(is.na(donnees_uci$diagnostic), NA_integer_,
+                                as.integer(donnees_uci$diagnostic > 0))
+# Distribution intermédiaire : les ? sont déjà NA, les zéros sont encore visibles.
+donnees_distribution <- import_uci$heart_avant_recodage
+donnees_distribution$diagnostic <- ifelse(is.na(donnees_distribution$diagnostic), NA_integer_,
+  as.integer(donnees_distribution$diagnostic > 0))
+benchmark_app <- charger_benchmark_app()
+libelles_app <- setNames(import_uci$dictionnaire$libelle, import_uci$colonnes)
+# Périmètre clinique explicite : 13 prédicteurs et diagnostic, sans métadonnées.
+bilan_perte_na <- calculer_perte_information(donnees_uci, import_uci$colonnes)
 
 function(input, output, session) {
+  ml_serveur(output, donnees_uci[c(import_uci$colonnes, "provenance")])
+  output$perte_na_indicateurs <- renderUI(cartes_perte_information(bilan_perte_na))
+  output$perte_na_graphique <- renderPlot(graphique_perte_information(bilan_perte_na),
+    bg = palette_heart$card)
+  output$perte_na_phrase <- renderText(phrase_perte_information(bilan_perte_na))
+  output$pipeline_benchmark <- renderPlot({
+    graphique_pipeline_benchmark(
+      names(benchmark_app$configuration$modeles),
+      repetitions = max(benchmark_app$resultats$repetition),
+      proportion = benchmark_app$configuration$proportion)
+  }, bg = palette_heart$card)
+
+  updateSelectInput(session, "variable_distribution", choices = setNames(import_uci$colonnes, libelles_app),
+                    selected = "cholesterol")
+  updateSelectInput(session, "variable_benchmark", choices = setNames(benchmark_app$cibles,
+    libelles_app[benchmark_app$cibles]), selected = "cholesterol")
+  updateSelectInput(session, "variable_na", choices = setNames(import_uci$colonnes, libelles_app),
+                    selected = "cholesterol")
   output$bilan_doublons <- renderText({
     b <- import_uci$bilan_nettoyage
-    paste(b$n_doublons_retires, "occurrences retirées sur", b$n_brut,
-          "lignes initiales ;", b$n_final,
-          "observations conservées. Une ligne par paire est gardée. Les fichiers sources sont inchangés.")
+    paste(b$n_doublons_retires, "doublons supprimés :", b$n_brut, "lignes initiales deviennent",
+      b$n_final, "observations. Les 14 valeurs originales sont comparées dans chaque centre ; la première occurrence est conservée.")
   })
-  output$recodages_na <- renderUI({
-    journal <- import_uci$journal_recodage
-    nb_interrogations <- sum(is.na(import_uci$heart_avant_recodage[import_uci$colonnes]))
-    nb_zeros <- function(variable)
-      sum(journal$n_zeros_recodes[journal$variable == variable])
-    fluidRow(
-      column(6, div(class = "recodage",
-        h4("1 · Marqueurs manquants UCI"),
-        p(class = "regle", "? → NA"),
-        p("Les points d'interrogation des fichiers sources indiquent une valeur manquante. Ils sont convertis en NA dès l'import [1]."),
-        p(strong(nb_interrogations), "valeurs manquantes d'origine dans les observations conservées après dédoublonnage."))),
-      column(6, div(class = "recodage",
-        h4("2 · Zéros de mesures non exploitables"),
-        p(class = "regle", "pa_repos et cholesterol : 0 → NA"),
-        p("Le recodage de ces deux mesures nulles repose sur leur plausibilité clinique, éclairée par les références bibliographiques [2, 3]."),
-        p(strong(nb_zeros("pa_repos")), "valeur de pression au repos et",
-          strong(nb_zeros("cholesterol")), "valeurs de cholestérol recodées en NA.")))
-    )
-  })
-  # Les données sources restent communes en lecture ; les sorties sont par session.
-  updateSelectInput(session, "source_apercu", choices = c(
-    "Toutes" = "toutes", setNames(names(import_uci$fichiers), names(import_uci$fichiers))
-  ))
-  apercu <- reactive({
-    req(input$source_apercu)
-    if (input$source_apercu == "toutes") donnees_uci else
-      donnees_uci[donnees_uci$provenance == input$source_apercu, ]
-  })
-  output$dimensions <- renderText({
-    paste(nrow(apercu()), "observations —", ncol(apercu()),
-          "variables disponibles (diagnostic original inclus).")
-  })
-  updateSelectInput(session, "variable_apercu",
-    choices = setNames(import_uci$colonnes, import_uci$dictionnaire$libelle),
-    selected = "age")
-  output$apercu <- renderPlot({
-    req(input$variable_apercu %in% import_uci$colonnes)
-    variable <- input$variable_apercu
-    d <- data.frame(valeur = apercu()[[variable]])
-    d <- d[!is.na(d$valeur), , drop = FALSE]
-    validate(need(nrow(d) > 0, "Aucune valeur observée pour cette variable dans ce centre."))
-    libelle <- import_uci$dictionnaire$libelle[match(variable, import_uci$colonnes)]
-    if (variable %in% c(variables_categorielles, "diagnostic")) {
-      d$valeur <- factor(d$valeur)
-      if (variable == "diagnostic")
-        d$valeur <- factor(d$valeur, levels = c("0", "1"),
-                          labels = c("Absence", "Présence"))
-      ggplot(d, aes(valeur)) + geom_bar(fill = "#165DDE", width = .65) +
-        labs(x = libelle, y = "Observations", caption = "Valeurs manquantes exclues. Les catégories cliniques suivent les codes UCI.") +
-        theme_minimal(base_size = 12)
-    } else {
-      ggplot(d, aes(valeur)) + geom_histogram(bins = 25, fill = "#165DDE", color = "white") +
-        labs(x = libelle, y = "Observations", caption = "Valeurs manquantes exclues.") +
-        theme_minimal(base_size = 12)
-    }
-  }, res = 110)
   output$effectifs <- renderPlot({
-    d <- as.data.frame(table(factor(apercu()$provenance, levels = names(libelles_sources))))
-    names(d) <- c("provenance", "n")
-    ggplot(d, aes(provenance, n)) + geom_col(fill = "#165DDE", width = .6) +
-      geom_text(aes(label = n), vjust = -.4) +
-      scale_x_discrete(labels = libelles_sources) +
+    z <- as.data.frame(table(import_uci$heart_brut$provenance))
+    names(z) <- c("provenance", "n")
+    ggplot(z, aes(provenance, n)) + geom_col(fill = palette_heart$blue, width = .6) +
+      geom_text(aes(label = n), vjust = -.5, colour = palette_heart$text, size = 4.6) +
+      scale_x_discrete(labels = centres_app) + scale_y_continuous(expand = expansion(mult = c(0, .12))) +
+      labs(x = NULL, y = "Observations avant dédoublonnage",
+           subtitle = paste(sum(z$n), "lignes réunies par empilement des quatre tables")) + theme_heart()
+  })
+  output$distribution <- renderPlot({
+    v <- req(input$variable_distribution)
+    validate(need(v %in% import_uci$colonnes, "Choisir une variable."))
+    z <- donnees_distribution[!is.na(donnees_distribution[[v]]), ]
+    g <- ggplot(z, aes(x = .data[[v]]))
+    if (v %in% c(variables_acm_app, "diagnostic")) {
+      z[[v]] <- factor(z[[v]])
+      g <- ggplot(z, aes(x = .data[[v]])) + geom_bar(fill = palette_heart$blue)
+    } else if (v %in% c("cholesterol", "pa_repos")) {
+      z$valeur_nulle <- ifelse(z[[v]] == 0, "Zéro à recoder ensuite", "Autre valeur")
+      g <- ggplot(z, aes(x = .data[[v]], fill = valeur_nulle)) +
+        geom_histogram(bins = 25, boundary = 0, colour = palette_heart$card) +
+        scale_fill_manual(values = c("Zéro à recoder ensuite" = palette_heart$amber,
+                                    "Autre valeur" = palette_heart$blue), name = NULL) +
+        theme(legend.position = "bottom")
+    } else g <- g + geom_histogram(bins = 25, fill = palette_heart$blue, colour = palette_heart$card)
+    g + labs(x = libelles_app[[v]], y = "Effectif observé") + theme_heart() +
+      theme(legend.position = "bottom")
+  })
+  output$distribution_effectif <- renderText({
+    v <- req(input$variable_distribution)
+    x <- donnees_distribution[[v]]
+    n <- sum(!is.na(x))
+    zeros <- if (v %in% c("cholesterol", "pa_repos")) paste0(
+      " Dont ", sum(x == 0, na.rm = TRUE), " zéros (",
+      if (n > 0) sprintf("%.1f", 100 * sum(x == 0, na.rm = TRUE) / n) else "0.0",
+      " % des valeurs renseignées), conservés ici avant leur recodage en NA.") else ""
+    paste0(n, " valeurs renseignées ; ", sum(is.na(x)),
+      " NA issus des ? exclus du graphique. Après dédoublonnage, avant recodage des zéros.", zeros)
+  })
+  output$na_cumules <- renderPlot({
+    v <- req(input$variable_na)
+    validate(need(v %in% import_uci$colonnes, "Choisir une variable."))
+    z <- compter_disponibilite_app(donnees_uci, v)
+    ggplot(z, aes(provenance, n, fill = statut)) + geom_col(width = .65, position = position_stack(reverse = TRUE)) +
+      geom_text(aes(label = ifelse(n > 0, n, "")),
+        position = position_stack(vjust = .5, reverse = TRUE), colour = "white", size = 4.2) +
+      scale_x_discrete(labels = centres_app, drop = FALSE) +
+      scale_fill_manual(values = c("Valeurs observées" = "#78A9DF", "NA" = "#244B78"), drop = FALSE) +
+      labs(x = NULL, y = "Nombre d'observations", fill = NULL, subtitle = libelles_app[[v]]) +
+      theme_heart() + theme(legend.position = "bottom", axis.text.x = element_text(angle = 20, hjust = 1))
+  }, bg = palette_heart$card)
+  output$na_detail <- renderPlot({
+    g <- import_uci$graphique_na_provenance() + theme_heart(13)
+    g$layers[[2]]$aes_params$size <- 4.2
+    g
+  }, bg = palette_heart$card)
+  output$benchmark_erreurs <- renderPlot({
+    v <- req(input$variable_benchmark)
+    metrique <- if (benchmark_app$types[[v]] == "quantitative") "RMSE" else "taux_erreur"
+    r <- benchmark_app$resultats
+    z <- r[r$variable == v & r$metrique == metrique & r$statut == "ok" & is.finite(r$valeur), ]
+    validate(need(nrow(z) > 0, "Aucun résultat disponible."))
+    ordre <- names(sort(tapply(z$valeur, z$modele_imputation, mean)))
+    z$modele_imputation <- factor(z$modele_imputation, levels = ordre)
+    ggplot(z, aes(modele_imputation, valeur)) + geom_boxplot(fill = palette_heart$blue, alpha = .6) +
+      geom_jitter(width = .1, height = 0, colour = palette_heart$text, alpha = .4, size = 1) +
+      labs(x = "Méthode", y = if (metrique == "RMSE") "RMSE" else "Taux d'erreur",
+           subtitle = libelles_app[[v]]) + theme_heart()
+  })
+  output$choix_modeles <- renderUI({
+    controles <- lapply(benchmark_app$cibles, function(v) {
+      selectInput(paste0("modele_", v), libelles_app[[v]], choices = benchmark_app$choix[[v]],
+                  selected = benchmark_app$defauts[[v]])
+    })
+    do.call(bslib::layout_columns, c(controles,
+      list(col_widths = bslib::breakpoints(xs = 12, md = 6, lg = 4), fill = FALSE)))
+  })
+  selections <- reactive(setNames(vapply(benchmark_app$cibles, function(v) {
+    x <- input[[paste0("modele_", v)]]
+    if (is.null(x)) benchmark_app$defauts[[v]] else x
+  }, character(1)), benchmark_app$cibles))
+  resultat <- reactiveVal(NULL)
+  erreur <- reactiveVal(NULL)
+  observeEvent(input$calculer_imputation, {
+    m <- input$nombre_imputations
+    req(m)
+    if (!is.finite(m) || m != as.integer(m) || m < 5 || m > 100) {
+      erreur("Choisir un nombre entier de jeux entre 5 et 100.")
+      return()
+    }
+    choix <- selections()
+    erreur(NULL)
+    nouvel <- tryCatch(withProgress(message = "Imputation et ACM", value = 0, {
+      imps <- calculer_imputations_app(donnees_uci, choix, benchmark_app, m = as.integer(m),
+        progression = function(i, total) setProgress(value = .9 * i / total,
+          detail = paste("Jeu", i, "sur", total)))
+      setProgress(value = .95, detail = "Projection des jeux sur l'ACM")
+      acm <- calculer_acm_app(imps)
+      list(imputations = imps, acm = acm)
+    }), error = function(e) { erreur(conditionMessage(e)); NULL })
+    if (!is.null(nouvel)) {
+      resultat(nouvel)
+      actif <- if (!is.null(resultat_acm())) resultat_acm()$acm else nouvel$acm
+      n <- ncol(actif$individus[[1]])
+      dims <- setNames(seq_len(n), paste("Dimension", seq_len(n)))
+      updateSelectInput(session, "axe_x", choices = dims, selected = 1)
+      updateSelectInput(session, "axe_y", choices = dims, selected = 2)
+    }
+  })
+  output$statut_imputation <- renderText({
+    e <- erreur()
+    r <- resultat()
+    if (!is.null(e)) return(paste("Calcul non terminé :", e,
+      if (!is.null(r)) "Les graphiques conservent le dernier calcul réussi." else ""))
+    if (is.null(r)) return("Choisir les modèles, puis cliquer sur Calculer l'imputation.")
+    perime <- !identical(selections(), r$imputations$selections) ||
+      !identical(as.integer(input$nombre_imputations), as.integer(r$imputations$m))
+    paste(r$imputations$m, "jeux calculés ;", nrow(donnees_uci), "observations conservées.",
+      if (perime) "Les choix ont changé : recalculer pour les appliquer à l'ACM." else "ACM disponible sur la troisième page.")
+  })
+  # Résultats exploratoires autonomes : aucun réajustement à chaque affichage.
+  resultat_acm <- reactiveVal(NULL)
+  erreur_acm <- reactiveVal(NULL)
+  publier_axes <- function(r) {
+    n <- ncol(r$individus[[1]])
+    dims <- setNames(seq_len(n), paste("Dimension", seq_len(n)))
+    updateSelectInput(session, "axe_x", choices = dims, selected = 1)
+    updateSelectInput(session, "axe_y", choices = dims, selected = 2)
+  }
+  observeEvent(input$calculer_acm, {
+    mode <- input$acm_mode
+    req(mode)
+    erreur_acm(NULL)
+    lourdes <- isTRUE(input$acm_lourdes)
+    nboot <- as.integer(input$acm_nboot)
+    req(length(nboot) == 1L, !is.na(nboot), nboot %in% c(20L, 50L, 100L))
+    nouveau <- tryCatch(withProgress(message = "Calcul de l’ACM", {
+      if (mode == "modeles") {
+        if (is.null(resultat())) stop("Calculer d’abord l’imputation sur Gestion des NA.")
+        v <- if (lourdes) variables_acm_app else setdiff(variables_acm_app, acm_variables_lourdes)
+        r <- calculer_acm_app(resultat()$imputations, variables = v)
+        origine <- resultat()$imputations
+      } else {
+        r <- acm_resultat_cache(donnees_uci, mode, lourdes, nboot)
+        origine <- NULL
+      }
+      list(acm = r, mode = mode, lourdes = lourdes, nboot = nboot, origine = origine)
+    }), error = function(e) { erreur_acm(conditionMessage(e)); NULL })
+    if (!is.null(nouveau)) {
+      resultat_acm(nouveau)
+      publier_axes(nouveau$acm)
+    }
+  })
+  output$acm_taux_na <- renderText({
+    v <- acm_variables_lourdes
+    paste("Taux de NA dans les données nettoyées :", paste(paste0(libelles_app[v],
+      " : ", pct_fr(100 * vapply(donnees_uci[v], function(z) mean(is.na(z)), numeric(1)), 2)), collapse = " ; "))
+  })
+  output$statut_acm <- renderText({
+    if (!is.null(erreur_acm())) return(paste("Calcul non terminé :", erreur_acm(),
+      "Le dernier résultat réussi reste affiché s’il existe."))
+    r <- resultat_acm()
+    if (is.null(r)) return("Les modèles choisis sont disponibles après calcul sur Gestion des NA. Pour les autres stratégies, cliquer sur Calculer l’ACM.")
+    perime <- !identical(input$acm_mode, r$mode) || !identical(isTRUE(input$acm_lourdes), r$lourdes) ||
+      (r$mode == "multiple" && !identical(as.integer(input$acm_nboot), r$nboot)) ||
+      (r$mode == "modeles" && !identical(resultat()$imputations, r$origine))
+    paste("Résultat appliqué :", names(acm_modes)[match(r$mode, unname(acm_modes))],
+      if (perime) "· Réglages modifiés : cliquer sur Calculer l’ACM pour les appliquer." else "")
+  })
+  acm_resultat <- reactive({
+    if (!is.null(resultat_acm())) return(resultat_acm()$acm)
+    validate(need(!is.null(resultat()), "Calculer les imputations sur Gestion des NA, ou choisir une stratégie ACM puis cliquer sur Calculer l’ACM."))
+    resultat()$acm
+  })
+  axes <- reactive({
+    a <- as.integer(c(req(input$axe_x), req(input$axe_y)))
+    validate(need(length(unique(a)) == 2, "Choisir deux dimensions différentes."),
+      need(all(is.finite(a)) && all(a >= 1L) && all(a <= ncol(acm_resultat()$individus[[1]])),
+        "Choisir des dimensions disponibles pour l’ACM affichée."))
+    a
+  })
+  output$acm_resume <- renderText(acm_texte_resultat(acm_resultat(), axes()))
+  output$acm_valeurs_propres <- renderPlot({
+    r <- acm_resultat()
+    z <- data.frame(dimension = seq_len(nrow(r$ref$eig)), valeur = r$ref$eig[, 1], pct = r$ref$eig[, 2])
+    ggplot(z, aes(factor(dimension), valeur)) + geom_col(fill = palette_heart$blue) +
+      geom_text(aes(label = pct_fr(pct)), vjust = -.5, colour = palette_heart$text, size = 3.7) +
       scale_y_continuous(expand = expansion(mult = c(0, .15))) +
-      labs(x = NULL, y = "Observations après nettoyage") + theme_minimal(base_size = 12)
-  }, res = 110)
-  output$dictionnaire <- renderUI({
-    req(input$variable_apercu %in% import_uci$colonnes)
-    d <- import_uci$dictionnaire
-    i <- match(input$variable_apercu, d$nom_fr)
-    div(class = "callout", strong(d$libelle[i]),
-      p("Nom de la variable : ", code(d$nom_fr[i]), " · Code UCI : ", code(d$nom_uci[i])),
-      if (input$variable_apercu == "diagnostic")
-        p("Diagnostic binaire : 0 = absence, 1 = présence. Le code UCI original (0 à 4) est conservé dans les données."))
-  })
-  output$doublons <- renderUI({
-    d <- import_uci$doublons_details
-    groupes <- split(d, interaction(d$provenance, d$groupe_profil, drop = TRUE))
-    tagList(lapply(groupes, function(g) {
-      retires <- g$ligne_source[import_uci$retirer[g$ligne_fusion]]
-      gardees <- g$ligne_source[!import_uci$retirer[g$ligne_fusion]]
-      div(class = "callout", strong(unname(libelles_sources[g$provenance[1]])),
-        p("Ligne source conservée : ", paste(gardees, collapse = ", "),
-          " → ligne source retirée : ", paste(retires, collapse = ", ")))
-    }))
-  })
-  output$combinaisons_na <- renderPlot({
-    validate(need(requireNamespace("VIM", quietly = TRUE),
-      'Installer VIM pour afficher ce graphique : install.packages("VIM")'))
-    ancien_par <- par(las = 2)
-    on.exit(par(ancien_par))
-    VIM::aggr(donnees_uci[import_uci$colonnes],
-      col = c("#B8D4FA", "#E88432"),
-      only.miss = TRUE, sortVars = TRUE, sortCombs = TRUE,
-      numbers = FALSE, prop = TRUE, cex.axis = .75,
-      ylabs = c("Proportion de NA", "Fréquence des combinaisons"))
-  }, res = 110)
-  output$na_global_ui <- renderPlot({
-    d <- data.frame(nb_na = rowSums(is.na(donnees_uci[import_uci$colonnes])))
-    ggplot(d, aes(nb_na)) + geom_bar(fill = "#165DDE", width = .7) +
-      scale_x_continuous(breaks = 0:length(import_uci$colonnes)) +
-      labs(x = "Nombre de mesures manquantes sur 14", y = "Observations",
-           caption = "Toutes les observations nettoyées sont incluses, y compris celles sans NA.") +
-      theme_minimal(base_size = 12)
-  }, res = 110)
-  output$na_detail <- renderPlot({ import_uci$graphique_na_provenance() }, res = 110)
-
-  libelles <- setNames(import_uci$dictionnaire$libelle, import_uci$colonnes)
-  parcours_serveur("complets", donnees_uci, import_uci$colonnes,
-    variables_categorielles, libelles, libelles_sources)
-  parcours_serveur("imputes", donnees_uci, import_uci$colonnes,
-    variables_categorielles, libelles, libelles_sources, imputation = TRUE)
-  serveur_tests_absence(input, output, session, associations_absence,
-                        dictionnaire_na, libelles_sources)
-
+      labs(x = "Dimension", y = "Valeur propre", subtitle = "Pourcentages d'inertie brute de l'ACM de référence") + theme_heart()
+  }, bg = palette_heart$card)
+  output$acm_modalites <- renderPlot({
+    graphe_acm_app(acm_resultat(), "modalites", axes(), isTRUE(input$ellipses_acm))
+  }, bg = palette_heart$card)
+  output$acm_individus <- renderPlot({
+    limite <- as.integer(req(input$limite_ellipses))
+    validate(need(is.finite(limite) && limite > 0, "Choisir une limite d'ellipses positive."))
+    graphe_acm_app(acm_resultat(), "individus", axes(), isTRUE(input$ellipses_acm), limite)
+  }, bg = palette_heart$card)
 }

@@ -1,3 +1,6 @@
+source("R/acm_imputation.R", local = TRUE)
+source("R/graphiques.R", local = TRUE)
+
 # Parcours exploratoires communs aux cas complets et aux données imputées.
 preparer_parcours <- function(donnees, colonnes, categories, imputation = FALSE,
                               ncp = 2L, methode = "AFDM") {
@@ -67,8 +70,15 @@ parcours_ui <- function(id, imputation = FALSE) {
     plotOutput(ns("distributions"), height = "520px"),
     p(class = "note", "La ligne centrale est la médiane, la boîte couvre les 50 % centraux et les points isolés indiquent les valeurs au-delà des moustaches. Chaque mesure possède sa propre échelle."),
     h4("3 · Modalités cliniques selon le diagnostic"),
-    plotOutput(ns("categories"), height = "620px"),
-    p(class = "note", "Chaque barre représente 100 % des observations d'un groupe de diagnostic. Les modalités suivent les codes UCI ; les proportions permettent de comparer des groupes de tailles différentes."),
+    radioButtons(ns("categories_vue"), "Lecture des proportions", inline = TRUE,
+      choices = c("Diagnostics positifs par modalité" = "positifs",
+                  "Modalités dans chaque groupe de diagnostic" = "distribution"), selected = "positifs"),
+    conditionalPanel("input.categories_vue == 'distribution'", ns = ns,
+      plotOutput(ns("categories"), height = "620px"),
+      p(class = "note", "Chaque barre représente 100 % des observations d'un groupe de diagnostic. Les modalités suivent les codes UCI.")),
+    conditionalPanel("input.categories_vue == 'positifs'", ns = ns,
+      plotly::plotlyOutput(ns("categories_positifs"), height = "1400px"),
+      p(class = "note", "Chaque point indique la part de diagnostics positifs parmi les observations de cette modalité. Le trait relie ce taux à la moyenne du parcours (pointillés). Orange : au-dessus de la moyenne ; bleu : en dessous. Survoler un point affiche le nombre de diagnostics positifs et le dénominateur. Cette comparaison est descriptive.")),
     h4("4 · Corrélations entre mesures numériques"),
     plotOutput(ns("correlations"), height = "480px"),
     p(class = "note", "Corrélations de Spearman : −1 indique une relation décroissante, +1 une relation croissante. Une corrélation ne démontre pas de causalité."),
@@ -77,13 +87,27 @@ parcours_ui <- function(id, imputation = FALSE) {
       column(4, selectInput(ns("y"), "Mesure verticale", choices = NULL)),
       column(4, selectInput(ns("couleur"), "Couleur des observations",
         choices = c("Diagnostic" = "diagnostic", "Centre" = "provenance")))),
-    plotOutput(ns("relations"), height = "400px"),
+    plotly::plotlyOutput(ns("relations"), height = "440px"),
+    p(class = "note", "Survoler un point affiche les deux mesures, le diagnostic, le centre et leur statut observé ou imputé. Cliquer dans la légende masque ou réaffiche un groupe."),
     h4("6 · ACM des variables catégorielles"),
-    p("L'ACM décrit les profils des variables catégorielles. Le diagnostic et la provenance sont supplémentaires : ils ne construisent pas les axes."),
+    p("Ce bloc autonome repart des données de référence nettoyées. Son mode de gestion des NA est indépendant des autres graphiques du parcours ; son effectif peut donc différer."),
+    fluidRow(
+      column(5, selectInput(ns("acm_mode"), "Gestion des NA pour cette ACM",
+        choices = acm_modes, selected = if (imputation) "simple" else "complets")),
+      column(4, selectInput(ns("acm_nboot"), "Nombre d'imputations multiples",
+        choices = c("20 · développement rapide" = 20, "50" = 50, "100 · analyse finale" = 100),
+        selected = 100)),
+      column(3, actionButton(ns("acm_calcul"), "Calculer l’ACM", class = "btn-primary"))),
+    checkboxInput(ns("acm_lourdes"), "Inclure le nombre de vaisseaux et le test au thallium", FALSE),
+    textOutput(ns("acm_taux_na")),
+    p(class = "note", "Modifier les réglages puis cliquer sur Calculer l’ACM. Les résultats déjà calculés sont réutilisés."),
+    div(class = "callout", textOutput(ns("acm_resume"))),
+    p("Le diagnostic ne participe jamais à l’imputation ni à la construction des axes : il est projeté en supplémentaire. La provenance est également supplémentaire ; elle peut aider à imputer et influence donc indirectement l’analyse via l’imputation."),
     plotOutput(ns("acm_individus"), height = "440px"),
-    plotOutput(ns("acm_modalites"), height = "540px"),
-    p(class = "note", "Les observations proches ont des profils catégoriels similaires. Les modalités proches de l'origine sont peu discriminantes sur ce plan. Une proximité entre modalités de variables différentes s'interprète avec leur qualité de représentation ; les axes des deux parcours sont calculés séparément."),
-    if (imputation) p(class = "note", "Les résultats décrivent un jeu complété par une imputation unique. Les relations peuvent être renforcées par la reconstruction et ne mesurent pas l'incertitude d'imputation.")
+    plotOutput(ns("acm_modalites"), height = "620px"),
+    p(class = "note", "Les croix signalent les observations comportant une valeur imputée. Le graphe des individus représente le jeu de référence, pas leur variabilité entre imputations multiples."),
+    p(class = "note", "Les ellipses de variabilité liée aux imputations multiples décrivent la sensibilité des positions des modalités : petite ellipse, faible sensibilité ; grande ellipse, forte dépendance aux valeurs imputées. Ce ne sont pas des intervalles de confiance du centre."),
+    p(class = "note", "Les points représentent les modalités de l’ACM de référence ; leur taille indique la qualité de représentation sur le plan (cos²). Lire les proximités avec cette qualité et l’inertie affichée. Les plans calculés séparément ne sont pas directement alignés.")
   )
 }
 
@@ -108,7 +132,7 @@ parcours_serveur <- function(id, reference, colonnes, categories, libelles, sour
       d$groupe <- factor(d$diagnostic, levels = 0:1, labels = c("Absence", "Présence"))
       d
     })
-    palette <- c("Absence" = "#165DDE", "Présence" = "#E88432")
+    palette <- couleurs_diagnostic
     output$resume <- renderText({
       p <- parcours()
       paste(nrow(p$donnees), "observations analysées sur", nrow(reference), "—",
@@ -169,56 +193,63 @@ parcours_serveur <- function(id, reference, colonnes, categories, libelles, sour
         coord_equal() + labs(x = NULL, y = NULL, fill = "Spearman") +
         theme_minimal(base_size = 11) + theme(axis.text.x = element_text(angle = 25, hjust = 1), panel.grid = element_blank())
     }, res = 110)
-    output$relations <- renderPlot({
+    parts_diagnostic <- reactive(calculer_parts_diagnostic(donnees(), categories, libelles))
+    output$categories_positifs <- plotly::renderPlotly({
+      d <- parts_diagnostic()
+      validate(need(nrow(d) > 0, "Aucune modalité avec un diagnostic renseigné."))
+      graphe_parts_diagnostic(d, 100 * mean(donnees()$diagnostic == 1, na.rm = TRUE))
+    })
+    output$relations <- plotly::renderPlotly({
       req(input$x %in% quanti, input$y %in% quanti, input$couleur %in% c("diagnostic", "provenance"))
       d <- donnees()
-      d$couleur <- if (input$couleur == "diagnostic") d$groupe else factor(sources[d$provenance])
-      d$reconstruit <- if (imputation)
-        rowSums(parcours()$masque[, c(input$x, input$y), drop = FALSE]) > 0 else FALSE
-      ggplot(d, aes(.data[[input$x]], .data[[input$y]], color = couleur, shape = reconstruit)) +
-        geom_point(alpha = .55, size = 2) + scale_shape_manual(values = c("FALSE" = 16, "TRUE" = 4),
-          labels = c("FALSE" = "Observées", "TRUE" = "Au moins une imputée")) +
-        labs(x = libelles[input$x], y = libelles[input$y], color = if (input$couleur == "diagnostic") "Diagnostic" else "Centre", shape = "Mesures") +
-        theme_minimal(base_size = 12) + theme(legend.position = "bottom")
-    }, res = 110)
-    acm <- reactive({
-      validate(need(requireNamespace("FactoMineR", quietly = TRUE), 'Installer FactoMineR pour afficher l’ACM.'))
-      d <- donnees()
-      actives <- categories[vapply(d[categories], function(z) length(unique(z)) > 1L, logical(1))]
-      validate(need(length(actives) >= 2, "Au moins deux variables catégorielles variables sont nécessaires."))
-      x <- as.data.frame(lapply(actives, function(v) factor(paste0(v, " = ", d[[v]]))))
-      names(x) <- actives
-      x$diagnostic <- d$groupe
-      x$provenance <- factor(d$provenance)
-      # Un centre unique n'est pas une variable supplémentaire exploitable.
-      sup <- c("diagnostic", "provenance")
-      sup <- sup[vapply(x[sup], nlevels, integer(1)) > 1L]
-      x <- x[c(actives, sup)]
-      FactoMineR::MCA(x, quali.sup = if (length(sup)) match(sup, names(x)) else NULL,
-        ncp = 2, graph = FALSE)
+      masque <- parcours()$masque
+      d$statut_x <- ifelse(masque[, input$x], "Imputée", "Observée")
+      d$statut_y <- ifelse(masque[, input$y], "Imputée", "Observée")
+      d$reconstruit <- factor(ifelse(masque[, input$x] | masque[, input$y],
+        "Au moins une imputée", "Observées"), levels = c("Observées", "Au moins une imputée"))
+      d$couleur <- if (input$couleur == "diagnostic") d$groupe else
+        factor(d$provenance, levels = names(sources), labels = unname(sources))
+      d$survol <- paste0("<b>", htmltools::htmlEscape(libelles[input$x]), "</b> : ",
+        signif(d[[input$x]], 5), " (", d$statut_x, ")<br><b>",
+        htmltools::htmlEscape(libelles[input$y]), "</b> : ", signif(d[[input$y]], 5),
+        " (", d$statut_y, ")<br>Diagnostic : ", d$groupe,
+        "<br>Centre : ", htmltools::htmlEscape(unname(sources[d$provenance])))
+      couleurs <- if (input$couleur == "diagnostic") palette else
+        setNames(unname(couleurs_centres[names(sources)]), unname(sources))
+      p <- plotly::plot_ly(d, x = d[[input$x]], y = d[[input$y]],
+        color = ~couleur, colors = couleurs, symbol = ~reconstruit, symbols = c("circle", "x"),
+        type = "scatter", mode = "markers", text = ~survol, hoverinfo = "text",
+        marker = list(size = 7, opacity = .55)) |>
+        plotly::layout(xaxis = list(title = libelles[[input$x]], gridcolor = "#E2EBF6"),
+                       yaxis = list(title = libelles[[input$y]], gridcolor = "#E2EBF6"))
+      habiller_interactif(p)
     })
-    axes_acm <- function(a) list(x = sprintf("Axe 1 (%.1f %% d'inertie)", a$eig[1,2]),
-                                 y = sprintf("Axe 2 (%.1f %% d'inertie)", a$eig[2,2]))
+    output$acm_taux_na <- renderText({
+      v <- intersect(acm_variables_lourdes, names(reference))
+      paste("Taux de NA dans la référence :", paste(sprintf("%s : %.2f %%",
+        libelles[v], 100 * vapply(reference[v], function(z) mean(is.na(z)), numeric(1))), collapse = " ; "),
+        ". Ces deux variables sont exclues par défaut de cette ACM.")
+    })
+    reglages_acm <- eventReactive(input$acm_calcul, {
+      list(mode = input$acm_mode %||% if (imputation) "simple" else "complets",
+           avec_lourdes = isTRUE(input$acm_lourdes),
+           nboot = as.integer(input$acm_nboot %||% 100L))
+    }, ignoreNULL = FALSE)
+    acm <- reactive({
+      r <- reglages_acm()
+      resultat <- tryCatch(withProgress(message = "Calcul de l’ACM…", {
+        acm_resultat_cache(reference, categories, libelles,
+                          r$mode, r$avec_lourdes, r$nboot)
+      }), error = function(e) list(erreur = conditionMessage(e)))
+      validate(need(is.null(resultat$erreur), resultat$erreur))
+      resultat
+    })
+    output$acm_resume <- renderText(acm_texte_resultat(acm(), sources))
     output$acm_individus <- renderPlot({
-      a <- acm(); d <- donnees(); axes <- axes_acm(a)
-      b <- data.frame(x = a$ind$coord[,1], y = a$ind$coord[,2], diagnostic = d$groupe)
-      ggplot(b, aes(x,y,color = diagnostic)) + geom_point(alpha = .4, size = 1.8) +
-        geom_hline(yintercept = 0, color = "grey80") + geom_vline(xintercept = 0, color = "grey80") +
-        scale_color_manual(values = palette) + labs(title = "ACM · Profils des observations", x = axes$x, y = axes$y, color = "Diagnostic") +
-        coord_equal() + theme_minimal(base_size = 12) + theme(legend.position = "bottom")
+      acm_graphe_individus(acm(), palette)
     }, res = 110)
     output$acm_modalites <- renderPlot({
-      a <- acm(); axes <- axes_acm(a)
-      b <- data.frame(x = a$var$coord[,1], y = a$var$coord[,2],
-        modalite = rownames(a$var$coord), qualite = rowSums(a$var$cos2[,1:2]))
-      b$variable <- sub(" = .*", "", b$modalite)
-      ggplot(b, aes(x,y,color = variable)) +
-        geom_hline(yintercept = 0, color = "grey80") + geom_vline(xintercept = 0, color = "grey80") +
-        geom_point(aes(size = qualite)) +
-        ggrepel::geom_text_repel(aes(label = modalite), seed = 42, max.overlaps = Inf, size = 3) +
-        labs(title = "ACM · Relations entre modalités", x = axes$x, y = axes$y,
-             color = "Variable", size = "Qualité sur le plan") +
-        coord_equal() + theme_minimal(base_size = 11) + theme(legend.position = "bottom")
+      acm_graphe_modalites(acm(), libelles, palette)
     }, res = 110)
   })
 }

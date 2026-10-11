@@ -205,7 +205,7 @@ synthese_ligne_absence <- function(analyse, x, libelles) {
 serveur_tests_absence <- function(input, output, session, analyse, dictionnaire, libelles_sources) {
   libelles <- c(setNames(dictionnaire$libelle, dictionnaire$nom_fr),
                 provenance = "Provenance", diagnostic = "Diagnostic binaire")
-  output$absence_matrice <- renderPlot({
+  output$absence_matrice <- plotly::renderPlotly({
     d <- analyse$resultats
     validate(need(nrow(d) > 0, "Aucune variable explicative ne contient de NA dans ce périmètre."))
     d$variable_absence <- factor(d$variable_absence, levels = rev(analyse$lignes))
@@ -215,7 +215,19 @@ serveur_tests_absence <- function(input, output, session, analyse, dictionnaire,
     categories <- c("Association détectée (BH < 5 %)", "Non significatif (BH ≥ 5 %)",
                     "Non calculable", "Non applicable")
     d$affichage <- factor(d$affichage, levels = categories)
-    ggplot(d, aes(variable_croisee, variable_absence, fill = affichage)) +
+    d$survol <- paste0("<b>Absence de ", htmltools::htmlEscape(libelles[as.character(d$variable_absence)]),
+      "</b><br>Croisée avec ", htmltools::htmlEscape(libelles[as.character(d$variable_croisee)]),
+      "<br>Statut : ", htmltools::htmlEscape(d$statut),
+      ifelse(d$statut == "Calculé", paste0("<br>Test : ", htmltools::htmlEscape(d$methode),
+        "<br>p brute : ", formater_p_absence(d$p_brute),
+        "<br>p ajustée BH : ", formater_p_absence(d$p_ajustee),
+        "<br>V de Cramér : ", sprintf("%.3f", d$v_cramer)), ""),
+      ifelse(is.na(d$n_utilise), "", paste0("<br>", d$n_utilise, " observations utilisées ; ",
+        d$n_exclus_y_na, " exclues (Y absente)<br>X manquante : ", d$n_x_manquantes,
+        " ; X observée : ", d$n_x_observees)),
+      ifelse(nzchar(d$raison), paste0("<br>Raison : ", htmltools::htmlEscape(d$raison)), ""),
+      ifelse(nzchar(d$avertissement), paste0("<br>Avertissement : ", htmltools::htmlEscape(d$avertissement)), ""))
+    p <- ggplot(d, aes(variable_croisee, variable_absence, fill = affichage, text = survol)) +
       geom_tile(colour = "white", linewidth = .6) +
       geom_text(aes(label = texte, colour = affichage == categories[1]), size = 2.8, show.legend = FALSE) +
       scale_color_manual(values = c("FALSE" = "#143052", "TRUE" = "white")) +
@@ -229,7 +241,11 @@ serveur_tests_absence <- function(input, output, session, analyse, dictionnaire,
       theme_minimal(base_size = 10) + theme(panel.grid = element_blank(),
         axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom") +
       guides(fill = guide_legend(nrow = 2))
-  }, res = 110)
+    habiller_interactif(plotly::ggplotly(p, tooltip = "text"))
+  })
+  output$absence_note <- renderText(paste(analyse$n_total,
+    "observations nettoyées des quatre centres, sans imputation —", analyse$n_tests_valides,
+    "tests valides, correction BH globale. P-values Monte-Carlo estimées ; diagonale non testée."))
   output$absence_conclusion <- renderText({
     d <- analyse$resultats
     associees <- unique(d$variable_absence[is.finite(d$p_ajustee) &

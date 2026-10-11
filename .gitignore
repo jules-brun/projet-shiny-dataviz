@@ -6,3 +6,6 @@
 dataset/kaggle/
 R/import_kaggle.R
 
+
+# Résultats exploratoires recalculables de l’ACM.
+resultats/cache_acm/

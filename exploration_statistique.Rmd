@@ -1,0 +1,466 @@
+---
+title: "Heart Disease — exploration statistique et choix des visualisations"
+output:
+  html_notebook:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+lang: fr
+---
+
+Ce notebook est un espace de travail indépendant pour **choisir les graphiques
+avant leur éventuelle intégration dans Shiny**. Ouvrir ce fichier dans RStudio,
+exécuter les cellules dans l'ordre ou cliquer sur **Preview**. Pour reconstruire
+l'aperçu depuis la racine du projet :
+`rmarkdown::render("exploration_statistique.Rmd")`.
+
+La démarche suit : import et qualité → description univariée → comparaisons
+selon le diagnostic → relations entre variables → exploration multivariée →
+sélection des graphiques. Les analyses portent sur les quatre fichiers UCI
+`processed` du projet ; `heart.csv` est une autre version et n'est pas mélangé
+à ces données. Aucune imputation n'est effectuée.
+
+## Préparation et paramètres
+
+Dépendances : `install.packages(c("ggplot2", "knitr", "rmarkdown"))` dans la
+console si nécessaire. Modifier `centres_retenus` pour explorer un centre,
+`variable_x` et `variable_y` pour changer le nuage de points.
+
+```{r preparation}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 11, fig.height = 7,
+                     dpi = 120, warning = TRUE, message = FALSE)
+stopifnot(requireNamespace("ggplot2", quietly = TRUE))
+library(ggplot2)
+Sys.setenv(TZ = "Europe/Paris")
+set.seed(2026)
+centres_retenus <- c("cleveland", "hungarian", "switzerland", "va")
+variable_x <- "age"
+variable_y <- "fc_max"
+palette_diagnostic <- c("Code 0" = "#2878B5", "Codes 1–4" = "#D55E00")
+theme_set(theme_minimal(base_size = 12))
+theme_update(panel.grid.minor = element_blank(),
+             plot.title = element_text(face = "bold"))
+```
+
+## Import et contrôle de qualité
+
+Réutiliser `R/import.R` permet d'appliquer exactement les règles actuelles du
+projet : `?` devient `NA`, une occurrence par profil répété dans un même centre
+est conservée, les zéros de pression au repos et de cholestérol deviennent `NA`.
+Un profil répété ne prouve pas qu'il s'agit du même patient. Les fichiers sources
+restent intacts. L'import s'exécute dans un environnement séparé ; son graphique
+initial est intercepté, puis les graphiques du notebook sont construits ici.
+
+```{r import, include=FALSE}
+charger_donnees <- function() {
+  if (!file.exists("R/import.R")) stop("Ouvrir le notebook à la racine du projet.")
+  env <- new.env(parent = globalenv())
+  grDevices::pdf(file = NULL)
+  appareil <- grDevices::dev.cur()
+  on.exit(grDevices::dev.off(appareil), add = TRUE)
+  invisible(capture.output(sys.source("R/import.R", envir = env)))
+  env
+}
+import_uci <- charger_donnees()
+stopifnot(length(centres_retenus) > 0,
+          all(centres_retenus %in% names(import_uci$fichiers)))
+d <- import_uci$heart[import_uci$heart$provenance %in% centres_retenus, ]
+quanti <- c("age", "pa_repos", "cholesterol", "fc_max", "depress_st")
+quali <- c("sexe", "type_doul_thor", "glyc_jeun_elevee", "ecg_repos",
+           "angine_effort", "pente_st", "nb_vaisseaux", "test_thallium")
+libelles <- setNames(import_uci$dictionnaire$libelle, import_uci$dictionnaire$nom_fr)
+sources <- c(cleveland = "Cleveland", hungarian = "Hongrie",
+             switzerland = "Suisse", va = "VA Long Beach")
+d$provenance <- factor(d$provenance, levels = centres_retenus,
+                       labels = unname(sources[centres_retenus]))
+d$diagnostic_initial <- d$diagnostic
+d$diagnostic <- factor(ifelse(is.na(d$diagnostic_initial), NA,
+                             ifelse(d$diagnostic_initial == 0, "Code 0", "Codes 1–4")),
+                       levels = names(palette_diagnostic))
+modalites <- list(
+  sexe = c("0" = "Femme", "1" = "Homme"),
+  type_doul_thor = c("1" = "Angine typique", "2" = "Angine atypique",
+                    "3" = "Douleur non angineuse", "4" = "Asymptomatique"),
+  glyc_jeun_elevee = c("0" = "≤ 120 mg/dL", "1" = "> 120 mg/dL"),
+  ecg_repos = c("0" = "Normal", "1" = "Anomalie ST-T", "2" = "Hypertrophie VG"),
+  angine_effort = c("0" = "Non", "1" = "Oui"),
+  pente_st = c("1" = "Montante", "2" = "Plate", "3" = "Descendante"),
+  nb_vaisseaux = setNames(as.character(0:3), as.character(0:3)),
+  test_thallium = c("3" = "Normal", "6" = "Défaut fixe", "7" = "Défaut réversible")
+)
+for (v in quali) {
+  stopifnot(all(is.na(d[[v]]) | d[[v]] %in% as.numeric(names(modalites[[v]]))))
+  d[[v]] <- factor(d[[v]], levels = names(modalites[[v]]), labels = modalites[[v]])
+}
+stopifnot(all(is.na(d$diagnostic_initial) | d$diagnostic_initial %in% 0:4))
+long_quanti <- do.call(rbind, lapply(quanti, function(v) {
+  data.frame(provenance = d$provenance, diagnostic = d$diagnostic,
+             variable = unname(libelles[v]), valeur = d[[v]])
+}))
+tableau <- function(x, digits = 2) knitr::kable(x, digits = digits, row.names = FALSE)
+```
+
+```{r audit}
+tableau(import_uci$bilan_nettoyage)
+tableau(import_uci$journal_recodage[
+  import_uci$journal_recodage$provenance %in% centres_retenus, ])
+tableau(head(d))
+dictionnaire <- import_uci$dictionnaire
+dictionnaire$type <- ifelse(dictionnaire$nom_fr %in% quanti, "Quantitative",
+                            ifelse(dictionnaire$nom_fr == "diagnostic",
+                                   "Cible (codes 0–4, puis binaire)", "Catégorielle"))
+tableau(dictionnaire)
+```
+
+Le premier bilan concerne les quatre sources ; les analyses suivantes concernent
+uniquement les centres sélectionnés. Les codes 1–4 sont regroupés pour les
+comparaisons binaires, tandis que le code original est conservé. Ces codes ne
+sont pas traités comme une mesure quantitative de sévérité.
+
+### Données manquantes et composition des centres
+
+**V01 — Carte des valeurs manquantes.** Le dénominateur est l'effectif du centre.
+Les analyses univariées utilisent les valeurs disponibles, les corrélations les
+paires disponibles, et l'ACP les lignes complètes sur ses cinq mesures.
+
+```{r valeurs-manquantes}
+variables <- import_uci$colonnes
+bilan_na <- do.call(rbind, lapply(levels(d$provenance), function(s) {
+  z <- d[d$provenance == s, variables]
+  data.frame(centre = s, variable = variables, n = nrow(z),
+             n_na = colSums(is.na(z)), pct_na = 100 * colMeans(is.na(z)))
+}))
+bilan_na$variable <- factor(bilan_na$variable, levels = rev(variables))
+ggplot(bilan_na, aes(centre, variable, fill = pct_na)) +
+  geom_tile(color = "white") + geom_text(aes(label = sprintf("%.1f %%", pct_na)), size = 3) +
+  scale_fill_gradient(low = "#EFF6FF", high = "#D55E00", limits = c(0, 100), name = "% NA") +
+  scale_y_discrete(labels = libelles) +
+  labs(title = "V01 · Disponibilité des variables par centre", x = NULL, y = NULL)
+```
+
+```{r composition, fig.height=5}
+composition <- as.data.frame(table(d$provenance, d$diagnostic, useNA = "ifany"))
+names(composition) <- c("centre", "diagnostic", "n")
+tableau(composition)
+ggplot(subset(composition, !is.na(diagnostic)), aes(centre, n, fill = diagnostic)) +
+  geom_col() + scale_fill_manual(values = palette_diagnostic) +
+  labs(title = "V02 · Composition de l'échantillon", x = NULL,
+       y = "Nombre d'observations", fill = "Diagnostic")
+tableau(as.data.frame(table(code_original = d$diagnostic_initial, useNA = "ifany")))
+```
+
+## Description univariée
+
+### Mesures quantitatives
+
+Effectifs et NA sont affichés pour chaque variable. La médiane et l'intervalle
+interquartile complètent la moyenne et l'écart type lorsque la distribution est
+asymétrique. Les valeurs extrêmes restent dans les données.
+
+```{r statistiques-descriptives}
+resumer <- function(x) {
+  z <- x[!is.na(x)]
+  if (!length(z)) return(data.frame(n = 0, n_na = length(x), moyenne = NA_real_,
+    ecart_type = NA_real_, minimum = NA_real_, q1 = NA_real_, mediane = NA_real_,
+    q3 = NA_real_, maximum = NA_real_))
+  data.frame(n = length(z), n_na = sum(is.na(x)), moyenne = mean(z),
+    ecart_type = sd(z), minimum = min(z), q1 = unname(quantile(z, .25)),
+    mediane = median(z), q3 = unname(quantile(z, .75)), maximum = max(z))
+}
+resume_quanti <- do.call(rbind, lapply(quanti, function(v) {
+  data.frame(variable = unname(libelles[v]), resumer(d[[v]]))
+}))
+tableau(resume_quanti)
+```
+
+**V03 — Histogrammes.** Comparer dispersion, asymétrie et éventuels amas de
+valeurs. Les unités et échelles diffèrent selon les facettes.
+
+```{r histogrammes}
+ggplot(subset(long_quanti, !is.na(valeur)), aes(valeur)) +
+  geom_histogram(bins = 25, fill = "#2878B5", color = "white") +
+  facet_wrap(~variable, scales = "free", ncol = 2) +
+  labs(title = "V03 · Distribution des mesures", x = NULL, y = "Effectif observé")
+```
+
+### Variables catégorielles
+
+**V04 — Fréquences des modalités.** Les NA sont une catégorie de disponibilité,
+pas une modalité clinique. Les proportions du tableau incluent les NA au
+dénominateur pour rendre leur poids visible.
+
+```{r categories, fig.height=10}
+frequences <- do.call(rbind, lapply(quali, function(v) {
+  x <- as.character(d[[v]])
+  x[is.na(x)] <- "Manquant"
+  t <- as.data.frame(table(x), stringsAsFactors = FALSE)
+  data.frame(variable = unname(libelles[v]), modalite = t$x,
+             n = t$Freq, pct = 100 * t$Freq / nrow(d))
+}))
+tableau(frequences)
+ggplot(frequences, aes(n, modalite, fill = modalite == "Manquant")) +
+  geom_col(show.legend = FALSE) + geom_text(aes(label = n), hjust = -.1, size = 3) +
+  scale_fill_manual(values = c("FALSE" = "#2878B5", "TRUE" = "#999999")) +
+  scale_x_continuous(expand = expansion(mult = c(0, .15))) +
+  facet_wrap(~variable, scales = "free", ncol = 2) +
+  labs(title = "V04 · Fréquences des catégories", x = "Effectif", y = NULL)
+```
+
+## Comparaisons selon le diagnostic
+
+### Mesures quantitatives : distributions et effets de centre
+
+**V05 — Boîtes et observations.** Les points au-delà des moustaches ne sont pas
+supprimés. Le tableau indique combien de mesures sont disponibles dans chaque
+groupe. **V06** répète la comparaison par centre : une différence globale peut
+refléter la composition des centres.
+
+```{r boites-diagnostic}
+resume_groupes <- do.call(rbind, lapply(levels(d$diagnostic), function(g) {
+  z <- d[!is.na(d$diagnostic) & d$diagnostic == g, ]
+  do.call(rbind, lapply(quanti, function(v) {
+    data.frame(diagnostic = g, variable = unname(libelles[v]), resumer(z[[v]]))
+  }))
+}))
+tableau(resume_groupes)
+observes <- subset(long_quanti, !is.na(valeur) & !is.na(diagnostic))
+ggplot(observes, aes(diagnostic, valeur, fill = diagnostic)) +
+  geom_boxplot(outlier.shape = NA, alpha = .5) +
+  geom_jitter(width = .15, height = 0, alpha = .15, size = .8) +
+  facet_wrap(~variable, scales = "free_y", ncol = 2) +
+  scale_fill_manual(values = palette_diagnostic, guide = "none") +
+  labs(title = "V05 · Mesures selon le diagnostic", x = NULL, y = NULL)
+```
+
+```{r boites-centres, fig.height=11}
+ggplot(observes, aes(diagnostic, valeur, fill = diagnostic)) +
+  geom_boxplot(outlier.alpha = .3) +
+  facet_grid(variable ~ provenance, scales = "free_y") +
+  scale_fill_manual(values = palette_diagnostic, guide = "none") +
+  labs(title = "V06 · Comparaisons à l'intérieur de chaque centre", x = NULL, y = NULL) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Variables catégorielles : proportions conditionnelles
+
+**V07 — Proportion de diagnostics positifs par modalité.** Chaque dénominateur
+comprend les observations avec une modalité et un diagnostic disponibles.
+Afficher les effectifs évite de donner le même poids à une petite catégorie et
+à une catégorie fréquente. Les intervalles de Wilson à 95 % décrivent la
+précision des proportions sous une hypothèse d'observations indépendantes ; ils
+ne corrigent pas les différences de recrutement entre centres.
+
+```{r proportions, fig.height=10}
+proportions <- do.call(rbind, lapply(quali, function(v) {
+  garder <- !is.na(d[[v]]) & !is.na(d$diagnostic)
+  groupes <- split(d$diagnostic[garder], droplevels(d[[v]][garder]))
+  do.call(rbind, lapply(names(groupes), function(m) {
+    n <- length(groupes[[m]])
+    k <- sum(groupes[[m]] == "Codes 1–4")
+    p <- k / n
+    z <- qnorm(.975)
+    centre <- (p + z^2 / (2 * n)) / (1 + z^2 / n)
+    marge <- z * sqrt(p * (1 - p) / n + z^2 / (4 * n^2)) / (1 + z^2 / n)
+    data.frame(variable = unname(libelles[v]), modalite = m, n = n,
+               positifs = k, proportion = p, bas = centre - marge, haut = centre + marge)
+  }))
+}))
+tableau(proportions)
+ggplot(proportions, aes(proportion, modalite)) +
+  geom_segment(aes(x = bas, xend = haut, yend = modalite), color = "#2878B5") +
+  geom_point(color = "#2878B5", size = 2) +
+  geom_text(aes(label = paste0("n=", n)), nudge_y = .25, size = 3) +
+  facet_wrap(~variable, scales = "free_y", ncol = 2) +
+  scale_x_continuous(limits = c(0, 1), labels = function(x) paste0(round(100*x), " %")) +
+  labs(title = "V07 · Diagnostic positif par modalité (IC 95 %)",
+       x = "Proportion de codes 1–4 parmi les diagnostics observés", y = NULL)
+```
+
+## Relations entre mesures quantitatives
+
+### Corrélations de Spearman et effectifs par paire
+
+**V08 — Carte des corrélations.** Spearman décrit les relations monotones et
+limite l'influence des valeurs extrêmes. Le diagnostic et les codes de
+catégories n'entrent pas dans cette matrice. Chaque cellule repose sur ses
+propres observations disponibles : ces coefficients peuvent donc concerner des
+sous-échantillons différents. Une corrélation ne démontre pas de causalité.
+
+```{r correlations}
+correlations <- cor(d[quanti], use = "pairwise.complete.obs", method = "spearman")
+effectifs_paires <- crossprod(1L * !is.na(as.matrix(d[quanti])))
+tableau(data.frame(variable = quanti, correlations, check.names = FALSE))
+tableau(data.frame(variable = quanti, effectifs_paires, check.names = FALSE))
+carte_cor <- expand.grid(x = quanti, y = quanti, stringsAsFactors = FALSE)
+carte_cor$rho <- as.vector(correlations)
+carte_cor$n <- as.vector(effectifs_paires)
+ggplot(carte_cor, aes(x, y, fill = rho)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = ifelse(is.na(rho), paste0("NA\nn=", n),
+                              sprintf("%.2f\nn=%d", rho, n))), size = 3) +
+  scale_fill_gradient2(low = "#2878B5", mid = "white", high = "#D55E00",
+                       midpoint = 0, limits = c(-1, 1), name = "ρ") +
+  scale_x_discrete(labels = libelles) + scale_y_discrete(labels = libelles) +
+  labs(title = "V08 · Corrélations de Spearman", x = NULL, y = NULL) +
+  theme(axis.text.x = element_text(angle = 35, hjust = 1))
+```
+
+### Nuage de points personnalisable
+
+**V09 — Relation entre deux mesures.** Les facettes permettent de comparer les
+centres, la couleur de comparer les diagnostics. Modifier les paramètres de la
+première cellule pour essayer d'autres couples. Les points sont transparents
+pour rendre visibles les superpositions.
+
+```{r nuage}
+stopifnot(variable_x %in% quanti, variable_y %in% quanti, variable_x != variable_y)
+paire <- d[complete.cases(d[c(variable_x, variable_y, "diagnostic")]), ]
+tableau(as.data.frame(table(centre = paire$provenance)))
+ggplot(paire, aes(x = .data[[variable_x]], y = .data[[variable_y]], color = diagnostic)) +
+  geom_point(alpha = .45, size = 1.5) + facet_wrap(~provenance) +
+  scale_color_manual(values = palette_diagnostic) +
+  labs(title = "V09 · Relation entre deux mesures par centre",
+       subtitle = paste(nrow(paire), "observations avec les deux mesures et le diagnostic"),
+       x = libelles[[variable_x]], y = libelles[[variable_y]], color = "Diagnostic")
+```
+
+## Tests exploratoires d'association
+
+Les tests complètent les graphiques. Pour les mesures, le test de Wilcoxon
+compare les distributions des deux groupes ; son interprétation comme différence
+de médianes demande des formes de distribution comparables. Pour les catégories,
+un χ² est utilisé si tous les effectifs attendus sont ≥ 5, sinon sa p-valeur
+est simulée avec 10 000 tirages. Les effectifs et le V de Cramér sont fournis.
+Les p-valeurs sont corrigées ensemble par Benjamini–Hochberg. Ces comparaisons
+restent exploratoires, sans ajustement sur le centre ni interprétation causale.
+
+```{r associations}
+tests_quanti <- do.call(rbind, lapply(quanti, function(v) {
+  z <- d[complete.cases(d[c(v, "diagnostic")]), ]
+  p <- if (all(table(z$diagnostic) >= 2) && length(unique(z[[v]])) > 1)
+    wilcox.test(z[[v]] ~ z$diagnostic, exact = FALSE)$p.value else NA_real_
+  data.frame(variable = unname(libelles[v]), n = nrow(z),
+             test = "Wilcoxon", V_cramer = NA_real_, p = p)
+}))
+tests_quali <- do.call(rbind, lapply(quali, function(v) {
+  z <- d[complete.cases(d[c(v, "diagnostic")]), ]
+  t <- table(droplevels(z[[v]]), droplevels(z$diagnostic))
+  p <- effet <- NA_real_
+  methode <- "Non calculable"
+  if (all(dim(t) >= 2)) {
+    attendu <- outer(rowSums(t), colSums(t)) / sum(t)
+    simuler <- any(attendu < 5)
+    test <- chisq.test(t, correct = FALSE, simulate.p.value = simuler, B = 10000)
+    p <- test$p.value
+    # V de Cramér calculé avec la statistique de Pearson sans correction.
+    effet <- sqrt(sum((t - attendu)^2 / attendu) / (sum(t) * min(dim(t) - 1)))
+    methode <- if (simuler) "χ² simulé (10 000)" else "χ² de Pearson"
+  }
+  data.frame(variable = unname(libelles[v]), n = nrow(z),
+             test = methode, V_cramer = effet, p = p)
+}))
+associations <- rbind(tests_quanti, tests_quali)
+associations$p_BH <- p.adjust(associations$p, method = "BH")
+tableau(associations, digits = 4)
+```
+
+## Exploration multivariée : ACP des mesures quantitatives
+
+L'ACP est centrée et réduite pour donner aux cinq mesures le même poids malgré
+leurs unités différentes. Elle utilise uniquement les cas complets sur ces
+mesures. Le diagnostic et le centre servent à lire les projections et ne
+construisent pas les axes. Cette sélection peut modifier la composition de
+l'échantillon : comparer le tableau ci-dessous au tableau de composition initial.
+Les variables catégorielles ne sont pas incluses comme nombres dans l'ACP.
+
+```{r acp}
+complets <- complete.cases(d[quanti])
+d_acp <- d[complets, ]
+bilan_acp <- do.call(rbind, lapply(levels(d$provenance), function(s) {
+  data.frame(centre = s, n_initial = sum(d$provenance == s),
+             n_acp = sum(d_acp$provenance == s))
+}))
+bilan_acp$pct_conserve <- 100 * bilan_acp$n_acp / bilan_acp$n_initial
+tableau(bilan_acp)
+acp <- NULL
+if (nrow(d_acp) > length(quanti) && all(vapply(d_acp[quanti], sd, numeric(1)) > 0)) {
+  acp <- prcomp(d_acp[quanti], center = TRUE, scale. = TRUE)
+  inertie <- 100 * acp$sdev^2 / sum(acp$sdev^2)
+  axes <- data.frame(axe = paste0("Dim ", seq_along(inertie)),
+                     pct = inertie, cumul = cumsum(inertie))
+  tableau(axes)
+  print(ggplot(axes, aes(axe, pct)) + geom_col(fill = "#2878B5") +
+    geom_text(aes(label = sprintf("%.1f %%", pct)), vjust = -.4) +
+    labs(title = "V10 · Variance expliquée par les axes", x = NULL, y = "% de variance") +
+    scale_y_continuous(expand = expansion(mult = c(0, .15))))
+} else {
+  cat("ACP non calculable : effectif insuffisant ou mesure constante/manquante.\n")
+}
+```
+
+**V11 — Projection des observations.** Examiner les regroupements et leur lien
+avec la provenance. **V12 — Cercle des corrélations.** Les flèches indiquent les
+relations des mesures avec les axes. Leur longueur sur ce plan renseigne sur la
+qualité de représentation ; deux flèches courtes ne permettent pas de conclure
+sur la relation entre les variables.
+
+```{r plans-acp, fig.height=6}
+if (!is.null(acp)) {
+  scores <- data.frame(acp$x[, 1:2], diagnostic = d_acp$diagnostic,
+                       provenance = d_acp$provenance)
+  noms_axes <- sprintf("Dim %d (%.1f %%)", 1:2, inertie[1:2])
+  print(ggplot(scores, aes(PC1, PC2, color = diagnostic)) +
+    geom_point(alpha = .5) + facet_wrap(~provenance) +
+    scale_color_manual(values = palette_diagnostic, na.value = "grey60") +
+    labs(title = "V11 · ACP : observations par centre", x = noms_axes[1],
+         y = noms_axes[2], color = "Diagnostic"))
+  coord <- sweep(acp$rotation[, 1:2], 2, acp$sdev[1:2], "*")
+  charges <- data.frame(x = coord[, 1], y = coord[, 2],
+                        variable = unname(libelles[rownames(coord)]))
+  cercle <- data.frame(x = cos(seq(0, 2*pi, length.out = 200)),
+                        y = sin(seq(0, 2*pi, length.out = 200)))
+  print(ggplot() + geom_path(data = cercle, aes(x, y), color = "grey70") +
+    geom_hline(yintercept = 0, color = "grey80") + geom_vline(xintercept = 0, color = "grey80") +
+    geom_segment(data = charges, aes(x = 0, y = 0, xend = x, yend = y),
+                 arrow = grid::arrow(length = grid::unit(.15, "cm")), color = "#2878B5") +
+    geom_text(data = charges, aes(x, y, label = variable), size = 3, vjust = -1,
+              check_overlap = FALSE) + coord_fixed(xlim = c(-1.3, 1.3), ylim = c(-1.2, 1.2)) +
+    labs(title = "V12 · ACP : cercle des corrélations", x = noms_axes[1], y = noms_axes[2]))
+}
+```
+
+## Choisir les visualisations
+
+Ce tableau sert de carnet de décision. Remplir la dernière colonne après examen,
+et préciser les variables ou centres intéressants. Aucun graphique de ce
+notebook n'est ajouté automatiquement à l'application.
+
+| ID | Visualisation | Question traitée | Choix / remarque |
+|:---|:---|:---|:---|
+| V01 | Carte des NA | Quelles variables sont disponibles dans chaque centre ? | À choisir |
+| V02 | Effectifs par centre et diagnostic | Quelle est la composition de l'échantillon ? | À choisir |
+| V03 | Histogrammes | Quelles formes ont les distributions ? | À choisir |
+| V04 | Fréquences des catégories | Quelles modalités sont fréquentes ou rares ? | À choisir |
+| V05 | Boîtes et points par diagnostic | Comment les mesures diffèrent-elles entre groupes ? | À choisir |
+| V06 | Boîtes par diagnostic et centre | Les différences se retrouvent-elles dans chaque centre ? | À choisir |
+| V07 | Proportions et IC par modalité | Quelles catégories présentent des proportions différentes ? | À choisir |
+| V08 | Corrélations et effectifs par paire | Quelles mesures sont associées ? | À choisir |
+| V09 | Nuage de points par centre | Quelle forme prend une relation particulière ? | À choisir |
+| V10 | Inertie ACP | Quelle part de la variance résume chaque axe ? | À choisir |
+| V11 | Individus ACP | Quels profils multivariés observe-t-on ? | À choisir |
+| V12 | Cercle des corrélations | Quelles mesures structurent le plan ACP ? | À choisir |
+
+Pour chaque graphique retenu, noter les effectifs, les exclusions dues aux NA,
+les unités, la définition du diagnostic et la population à laquelle il se
+rapporte. Les centres constituent des échantillons hospitaliers distincts ; les
+proportions observées ne représentent pas une prévalence en population générale.
+
+## Reproductibilité
+
+Documentation locale : `dataset/heart-disease.names`. Source : UCI Heart Disease,
+Janosi, Steinbrunn, Pfisterer et Detrano (1989), DOI `10.24432/C52P4X`, licence
+CC BY 4.0. Les règles de nettoyage sont détaillées dans `R/import.R`.
+
+```{r session}
+sessionInfo()
+```

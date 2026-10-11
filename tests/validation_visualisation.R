@@ -27,7 +27,7 @@ for (imputation in c(FALSE, TRUE)) {
     categories = variables_categorielles, libelles = libelles,
     sources = libelles_sources, imputation = imputation), {
     session$setInputs(ncp = 2, methode = "AFDM", x = "age", y = "fc_max", couleur = "diagnostic")
-    for (nom in c("centres", "distributions", "categories", "correlations", "relations", "acm_individus", "acm_modalites"))
+    for (nom in c("centres", "distributions", "categories", "correlations", "relations", "categories_positifs", "acm_individus", "acm_modalites"))
       stopifnot(!is.null(output[[nom]]))
     if (imputation) invisible(output$imputations)
     session$setInputs(x = "pa_repos", y = "cholesterol", couleur = "provenance")
