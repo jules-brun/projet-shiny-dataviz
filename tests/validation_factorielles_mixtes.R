@@ -51,9 +51,9 @@ for (r in list(cc,si,mi)) stopifnot(identical(rownames(r$ref$quanti.sup$coord), 
   !any(variables_quantitatives_app %in% r$variables))
 
 afdm <- calculer_afdm_app(imps)
-stopifnot(setequal(afdm$variables, c(variables_quantitatives_app, variables_acm_app, "provenance")),
-  length(afdm$variables) == 14L, !any(c("diagnostic", "diagnostic_initial") %in% afdm$variables),
-  names(afdm$ref$call$X)[afdm$ref$call$sup.var] == "diagnostic",
+stopifnot(setequal(afdm$variables, c(variables_quantitatives_app, variables_acm_app)),
+  length(afdm$variables) == 13L, !any(c("diagnostic", "diagnostic_initial", "provenance") %in% afdm$variables),
+  identical(names(afdm$ref$call$X)[afdm$ref$call$sup.var], c("diagnostic", "provenance")),
   identical(rownames(afdm$ref$quanti.var$coord), variables_quantitatives_app),
   max(abs(predict(afdm$ref, newdata = tableau_afdm_app(imps$simple,afdm$variables))$coord -
     afdm$ref$ind$coord)) < 1e-8)
@@ -70,6 +70,11 @@ stopifnot(isTRUE(all.equal(afdm$ref$ind$coord, calculer_afdm_app(change)$ref$ind
 change$simple$diagnostic[1:5] <- NA_integer_
 change$jeux <- lapply(change$jeux,function(j) {j$diagnostic[1:5] <- NA_integer_; j})
 stopifnot(isTRUE(all.equal(afdm$ref$ind$coord, calculer_afdm_app(change)$ref$ind$coord)))
+# La provenance est supplémentaire : la permuter ne change pas les axes
+autre <- imps
+autre$simple$provenance <- rev(autre$simple$provenance)
+autre$jeux <- lapply(autre$jeux, function(j) {j$provenance <- autre$simple$provenance; j})
+stopifnot(isTRUE(all.equal(afdm$ref$ind$coord, calculer_afdm_app(autre)$ref$ind$coord)))
 bad <- imps; bad$jeux[[1]]$cholesterol[1] <- NA_real_
 stopifnot(inherits(try(calculer_afdm_app(bad),silent=TRUE),"try-error"))
 bad <- imps; bad$jeux[[1]] <- bad$jeux[[1]][rev(seq_len(nrow(d))), ]
@@ -113,4 +118,4 @@ shiny::testServer(serveur, {
   stopifnot(identical(avant,afdm_resultat()), !grepl("Ellipses AFDM",output$afdm_statut,fixed=TRUE))
 })
 stopifnot(identical(original,donnees_uci))
-cat("Validation : cinq quantitatives supplémentaires, AFDM à 14 variables, diagnostic exclu des axes, projections communes, ellipses et Shiny.\n")
+cat("Validation : cinq quantitatives supplémentaires, AFDM à 13 variables, provenance supplémentaire, diagnostic exclu des axes, projections communes, ellipses et Shiny.\n")

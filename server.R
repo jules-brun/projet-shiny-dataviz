@@ -178,7 +178,7 @@ function(input, output, session) {
     perime <- !identical(selections(), r$imputations$selections) ||
       !identical(as.integer(input$nombre_imputations), as.integer(r$imputations$m))
     paste(r$imputations$m, "jeux calculés ;", nrow(donnees_uci), "observations conservées.",
-      if (perime) "Les choix ont changé : recalculer pour les appliquer à l'ACM." else "ACM disponible sur la troisième page.")
+      if (perime) "Les choix ont changé : recalculer pour les appliquer à l'AFDM." else "AFDM disponible sur la troisième page.")
   })
   # Résultats exploratoires autonomes : aucun réajustement à chaque affichage.
   resultat_acm <- reactiveVal(NULL)
@@ -300,7 +300,7 @@ function(input, output, session) {
   output$afdm_statut <- renderText({
     r <- afdm_resultat()
     paste(r$m, "jeux imputés avec les modèles choisis sur Gestion des NA ·", length(r$variables),
-      "variables actives, dont la provenance · Diagnostic supplémentaire.",
+      "variables actives · Diagnostic et provenance supplémentaires.",
       if (!identical(selections(), r$selections) || (!is.null(input$nombre_imputations) &&
           !identical(as.integer(input$nombre_imputations), as.integer(r$m))))
         "Choix modifiés : recalculer l’imputation sur Gestion des NA pour les appliquer à l’AFDM." else "",

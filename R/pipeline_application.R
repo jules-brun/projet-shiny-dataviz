@@ -263,8 +263,7 @@ graphe_acm_app <- function(res, vue, axes = c(1L, 2L), ellipses = FALSE, limite 
       ggplot2::labs(colour = "Variable")
   }
   titres <- sprintf("Dimension %d (%.1f %%)", axes, res$ref$eig[axes, 2])
-  note_sup <- if (identical(res$analyse, "AFDM")) "Diagnostic supplémentaire · Provenance active" else
-    "Diagnostic et provenance supplémentaires"
+  note_sup <- "Diagnostic et provenance supplémentaires"
   g + ggplot2::labs(x = titres[1], y = titres[2],
     caption = if (isTRUE(res$individus_reference)) {
       if (vue == "individus") "Positions du jeu de référence ; aucune variabilité individuelle représentée."

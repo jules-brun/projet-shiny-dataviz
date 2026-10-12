@@ -75,7 +75,7 @@ shiny::testServer(serveur, {
   session$setInputs(axe_x = "2", axe_y = "3", ellipses_acm = TRUE)
   for (nom in c("acm_valeurs_propres", "acm_modalites", "acm_individus"))
     stopifnot(!is.null(output[[nom]]))
-  stopifnot(grepl("ACM disponible", output$statut_imputation))
+  stopifnot(grepl("AFDM disponible", output$statut_imputation))
   # Régression : le mode choisi doit conserver les projections des cinq jeux
   # et la case doit publier des contours réellement calculables.
   session$setInputs(acm_mode = "modeles", acm_lourdes = TRUE, acm_nboot = 20,
