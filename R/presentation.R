@@ -94,8 +94,8 @@ presentation_ui <- function() {
       p("Projet Data visualisation & Machine Learning · M2 Science des données · Institut Agro · 2026–2027."),
       div(class = "guide-onglets",
         div(class = "guide-carte", strong("Antonin Rivron"), p(class = "note", "Import, nettoyage et gestion des valeurs manquantes")),
-        div(class = "guide-carte", strong("Jules Brun"), p(class = "note", "Machine learning")),
-        div(class = "guide-carte", strong("Youri Michalowski-Skarbek"), p(class = "note", "Visualisations et interface"))),
+        div(class = "guide-carte", strong("Jules Brun"), p(class = "note", "Visualisations et interface")),
+        div(class = "guide-carte", strong("Youri Michalowski-Skarbek"), p(class = "note", "Machine Learning"))),
       p(class = "note", "Janosi A., Steinbrunn W., Pfisterer M., Detrano R. (1989). Heart Disease. UCI Machine Learning Repository. ",
         tags$a("DOI 10.24432/C52P4X", href = "https://doi.org/10.24432/C52P4X", target = "_blank", rel = "noopener noreferrer"),
         " — licence CC BY 4.0. Detrano R. et al. (1989). International application of a new probability algorithm for the diagnosis of coronary artery disease. American Journal of Cardiology, 64, 304–310."))
