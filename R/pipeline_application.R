@@ -1,5 +1,7 @@
 source("R/graphiques.R", local = TRUE)
 source("R/acm_imputation.R", local = TRUE)
+source("R/acm_quantitatives.R", local = TRUE)
+source("R/afdm_application.R", local = TRUE)
 
 # Calculs de la nouvelle application : benchmark sauvegardé et projections communes.
 variables_acm_app <- c("sexe", "type_doul_thor", "glyc_jeun_elevee", "ecg_repos",
@@ -80,8 +82,10 @@ calculer_imputations_app <- function(d, selections, benchmark, m = 20L, seed = 2
   })
   masque <- is.na(d[variables_acm_app])
   rownames(masque) <- rownames(d)
+  masque_complet <- is.na(d[c(variables_acm_app, variables_quantitatives_app, "provenance")])
+  rownames(masque_complet) <- rownames(d)
   list(simple = simple, jeux = jeux, selections = selections, m = m, seed = seed,
-       masque = masque)
+       masque = masque, masque_complet = masque_complet)
 }
 
 tableau_acm_app <- function(d, niveaux = NULL, variables = variables_acm_app) {
@@ -94,7 +98,7 @@ tableau_acm_app <- function(d, niveaux = NULL, variables = variables_acm_app) {
 
 # Moteur factoriel commun : stratégies Jules et modèles choisis de la page 2.
 calculer_acm_app <- function(imputations, variables = variables_acm_app,
-                             individus_reference = FALSE) {
+                             individus_reference = FALSE, quantitatives = variables_quantitatives_app) {
   d <- imputations$simple
   if (!length(imputations$jeux) || length(imputations$jeux) != imputations$m)
     stop("Le nombre de jeux imputés ne correspond pas au nombre annoncé.")
@@ -114,9 +118,17 @@ calculer_acm_app <- function(imputations, variables = variables_acm_app,
   utilisables <- names(sup)[vapply(sup, function(z)
     !anyNA(z) && nlevels(droplevels(z)) > 1L, logical(1))]
   base <- cbind(x, sup[utilisables])
+  if (length(quantitatives)) for (j in c(list(d), imputations$jeux)) {
+    if (!all(quantitatives %in% names(j)) || any(!vapply(j[quantitatives], function(z)
+      is.numeric(z) && all(is.finite(z)), logical(1))))
+      stop("Les variables quantitatives doivent être complétées dans tous les jeux avant l’ACM.")
+  }
+  q <- quantitatives[vapply(d[quantitatives], function(z) stats::sd(z) > 0, logical(1))]
+  base <- cbind(base, d[q])
+  quanti <- if (length(q)) match(q, names(base)) else NULL
   ncp <- min(nrow(x) - 1L, sum(vapply(x, nlevels, integer(1))) - ncol(x))
   ref <- FactoMineR::MCA(base, quali.sup = if (length(utilisables))
-    match(utilisables, names(base)) else NULL, ncp = ncp, graph = FALSE)
+    match(utilisables, names(base)) else NULL, quanti.sup = quanti, ncp = ncp, graph = FALSE)
   if (ncol(ref$ind$coord) < 2L) stop("Deux dimensions exploitables sont nécessaires.")
   # Même repère pour chaque jeu ; les lignes et les modalités restent alignées.
   coords <- lapply(imputations$jeux, function(j) {
@@ -151,7 +163,10 @@ calculer_acm_app <- function(imputations, variables = variables_acm_app,
        modalites = modalites, reference_modalites = reference_modalites,
        diagnostic = sup$diagnostic, provenance = sup$provenance,
        impute = rowSums(imputations$masque[, variables, drop = FALSE]) > 0, m = imputations$m,
-       variables = variables, individus_reference = individus_reference)
+       variables = variables, individus_reference = individus_reference,
+       analyse = "ACM", supplementaires = c("diagnostic", "provenance"), quantitatives = q,
+       quantitatives_constantes = setdiff(quantitatives, q),
+       quantitatives_selections = imputations$selections[intersect(quantitatives, names(imputations$selections))])
 }
 
 ellipses_app <- function(nuage, limite = Inf) {
@@ -209,6 +224,7 @@ graphe_acm_app <- function(res, vue, axes = c(1L, 2L), ellipses = FALSE, limite 
   stopifnot(length(unique(axes)) == 2, all(axes >= 1), all(axes <= ncol(res$individus[[1]])))
   nuage <- nuage_acm_app(res, vue, axes)
   points <- points_acm_app(res, vue, axes)
+  supplementaires <- if (is.null(res$supplementaires)) c("diagnostic", "provenance") else res$supplementaires
   if (vue == "individus") points$diagnostic <- res$diagnostic[as.integer(points$id)] else
     points$variable <- sub(" :.*$", "", points$id)
   g <- ggplot2::ggplot() +
@@ -237,7 +253,7 @@ graphe_acm_app <- function(res, vue, axes = c(1L, 2L), ellipses = FALSE, limite 
     titres_variables <- libelles_variables_acm
     points$libelle <- sub(" : ", " :\n", libeller_points_acm(points$id), fixed = TRUE)
     g <- g + ggplot2::geom_point(data = points, ggplot2::aes(x, y, colour = variable,
-      shape = variable %in% c("diagnostic", "provenance")), size = 3) +
+      shape = variable %in% supplementaires), size = 3) +
       ggrepel::geom_text_repel(data = points, ggplot2::aes(x, y, label = libelle, colour = variable),
         seed = 42, max.overlaps = Inf, size = 3.5, box.padding = .6, point.padding = .3,
         force = 5, force_pull = .1, max.time = 2, max.iter = 100000, min.segment.length = 0,
@@ -247,13 +263,15 @@ graphe_acm_app <- function(res, vue, axes = c(1L, 2L), ellipses = FALSE, limite 
       ggplot2::labs(colour = "Variable")
   }
   titres <- sprintf("Dimension %d (%.1f %%)", axes, res$ref$eig[axes, 2])
+  note_sup <- if (identical(res$analyse, "AFDM")) "Diagnostic supplémentaire · Provenance active" else
+    "Diagnostic et provenance supplémentaires"
   g + ggplot2::labs(x = titres[1], y = titres[2],
     caption = if (isTRUE(res$individus_reference)) {
       if (vue == "individus") "Positions du jeu de référence ; aucune variabilité individuelle représentée."
       else paste0("Points : positions moyennes de ", res$m, " jeu(x) projeté(s) dans le repère de référence",
-        "\nDiagnostic et provenance supplémentaires",
+        "\n", note_sup,
         if (ellipses && res$m >= 3L) "\nEllipses de variabilité liée aux imputations multiples ; contours descriptifs." else "")
-    } else paste0(res$m, " jeux imputés · Points : positions moyennes · Diagnostic et provenance supplémentaires",
+    } else paste0(res$m, " jeux imputés · Points : positions moyennes · ", note_sup,
       if (ellipses) "\nEllipses de variabilité d’imputation ; contours descriptifs." else "")) +
     ggplot2::coord_equal() + theme_heart() + ggplot2::theme(legend.position = "bottom")
 }

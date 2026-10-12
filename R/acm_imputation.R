@@ -15,7 +15,8 @@ acm_avec_graine <- function(graine, calcul) {
 
 calculer_acm_conditionnelle <- function(donnees, categories = variables_acm_app,
   mode = "complets", avec_lourdes = TRUE, nboot = 20L,
-  graine = 20261011L, ncp_max = 5L, nbsim = 10L) acm_avec_graine(graine, {
+  graine = 20261011L, ncp_max = 5L, nbsim = 10L,
+  quantitatives = NULL) acm_avec_graine(graine, {
   stopifnot(mode %in% c("complets", "simple", "multiple"),
     nboot %in% 3:100, ncp_max >= 1L, nbsim >= 1L)
   variables <- intersect(categories, variables_acm_app)
@@ -69,9 +70,24 @@ calculer_acm_conditionnelle <- function(donnees, categories = variables_acm_app,
   }
   simple <- reconstruire(complet)
   jeux <- if (is.null(mi)) list(simple) else lapply(mi$res.MI, reconstruire)
+  if (!is.null(quantitatives)) {
+    if (!identical(quantitatives$lignes, rownames(donnees)) ||
+        nrow(quantitatives$simple) != nrow(donnees))
+      stop("Imputations quantitatives mal alignées avec la cohorte.")
+    if (mode == "multiple" && is.null(mi)) jeux <- rep(list(simple), nboot)
+    if (length(quantitatives$jeux) != length(jeux))
+      stop("Nombre de jeux quantitatifs différent de celui de l’ACM.")
+    q <- names(quantitatives$simple)
+    simple[q] <- quantitatives$simple[garder, , drop = FALSE]
+    jeux <- lapply(seq_along(jeux), function(i) {
+      z <- jeux[[i]]; z[q] <- quantitatives$jeux[[i]][garder, , drop = FALSE]; z
+    })
+  }
   imps <- list(simple = simple, jeux = jeux, masque = masque, m = length(jeux))
+  if (!is.null(quantitatives)) imps$selections <- quantitatives$selections
   # Vue individus de référence exclusivement pour les trois stratégies Jules.
-  res <- calculer_acm_app(imps, variables, individus_reference = TRUE)
+  res <- calculer_acm_app(imps, variables, individus_reference = TRUE,
+    quantitatives = if (is.null(quantitatives)) character() else names(quantitatives$simple))
   res$mode <- mode; res$n <- nrow(d); res$n_total <- nrow(donnees)
   res$ncp <- ncp; res$lignes <- which(garder); res$complete <- simple[variables]
   res$masque <- masque; res$auxiliaires <- auxiliaires
@@ -83,10 +99,10 @@ calculer_acm_conditionnelle <- function(donnees, categories = variables_acm_app,
 # Cache partagé entre sessions ; stockage RDS optionnel, clé dépendante du protocole.
 acm_cache_memoire <- new.env(parent = emptyenv())
 acm_resultat_cache <- function(donnees, mode = "complets", avec_lourdes = TRUE,
-  nboot = 20L, graine = 20261011L, ncp_max = 5L, nbsim = 10L) {
+  nboot = 20L, graine = 20261011L, ncp_max = 5L, nbsim = 10L, quantitatives = NULL) {
   versions <- vapply(c("FactoMineR", "missMDA"), function(p)
     if (requireNamespace(p, quietly = TRUE)) as.character(utils::packageVersion(p)) else "absent", character(1))
-  cle <- digest::digest(list(donnees, mode, avec_lourdes, nboot, graine, ncp_max, nbsim,
+  cle <- digest::digest(list(donnees, mode, avec_lourdes, nboot, graine, ncp_max, nbsim, quantitatives,
     versions, R.version.string, variables_acm_app, acm_variables_lourdes,
     body(calculer_acm_conditionnelle), body(calculer_acm_app), body(tableau_acm_app), body(acm_avec_graine)))
   if (exists(cle, envir = acm_cache_memoire, inherits = FALSE)) return(acm_cache_memoire[[cle]])
@@ -94,7 +110,7 @@ acm_resultat_cache <- function(donnees, mode = "complets", avec_lourdes = TRUE,
   fichier <- if (!is.null(dossier)) file.path(dossier, paste0(cle, ".rds")) else NULL
   if (!is.null(fichier) && file.exists(fichier)) res <- readRDS(fichier) else {
     res <- calculer_acm_conditionnelle(donnees, mode = mode, avec_lourdes = avec_lourdes,
-      nboot = nboot, graine = graine, ncp_max = ncp_max, nbsim = nbsim)
+      nboot = nboot, graine = graine, ncp_max = ncp_max, nbsim = nbsim, quantitatives = quantitatives)
     if (!is.null(fichier)) {
       dir.create(dossier, recursive = TRUE, showWarnings = FALSE)
       tmp <- tempfile(tmpdir = dossier); saveRDS(res, tmp)

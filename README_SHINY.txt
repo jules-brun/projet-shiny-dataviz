@@ -125,6 +125,37 @@ d’association. Les plans des stratégies sont distincts, sans alignement entre
 Les libellés UCI sont centralisés dans R/graphiques.R ; diagnostic reste 0/1.
 Le thème de référence est toujours theme_heart() dans R/design.R.
 
+Les cinq mesures quantitatives sont systématiquement supplémentaires dans l'ACM :
+âge, pression au repos, cholestérol, fréquence cardiaque maximale et dépression ST.
+Leur cercle représente les corrélations du jeu de référence calculées par
+quanti.sup de FactoMineR::MCA ; elles ne construisent jamais les axes.
+Chaque mesure est complétée avec son modèle choisi sur Gestion des NA. Les cas
+complets, l'ACM régularisée et MIMCA réutilisent les valeurs de cette page si les
+modèles correspondent et le nombre de jeux suffit ; sinon elles complètent ces
+mesures séparément avec les mêmes modèles, sans discrétisation ni remplacement
+silencieux par une moyenne. Une mesure constante n'a pas de corrélation définie.
+Le choix de gradient du cholestérol est supprimé ; seuls les contours de
+variabilité peuvent être activés ou désactivés pour l'affichage des cartes.
+
+AFDM en bas de la page : 13 variables cliniques et provenance actives,
+diagnostic binaire supplémentaire. Le diagnostic original dupliqué n'est pas
+utilisé. Cette analyse réutilise tous les jeux calculés sur Gestion des NA,
+indépendamment des stratégies et des exclusions choisies pour l'ACM. Calculer
+l'imputation sur cette page pour la rendre disponible ; aucun modèle n'est
+réajusté lors d'un changement d'axes ou de la case des ellipses.
+Une seule FactoMineR::FAMD est ajustée sur le jeu de référence ; chaque jeu
+imputé est projeté par predict.FAMD avec les mêmes centres, échelles, fréquences
+des modalités et axes. Les barycentres des modalités AFDM sont les moyennes des
+coordonnées individuelles (sans la division par racine de valeur propre de l'ACM).
+Les graphiques présentent l'inertie, les liens des variables aux axes (r² pour
+les mesures, η² pour les catégories), les corrélations quantitatives du jeu de
+référence, les modalités et les individus. Les cartes de variables, modalités
+et individus affichent leurs positions moyennes et, avec au moins trois jeux
+variables, leurs contours descriptifs de covariance. Centres et couleurs des
+ellipses concordent avec leurs points. Le diagnostic n'intervient dans aucun
+ajustement, normalisation ou imputation ; la provenance est active en AFDM.
+Les plans ACM et AFDM sont distincts et leurs axes se choisissent séparément.
+
 Cache mémoire partagé entre sessions et cache RDS dans resultats/cache_acm/,
 identifié par les données, paramètres, code et versions des packages.
 Les réglages modifiés demandent un nouveau clic et une erreur conserve le dernier
@@ -136,6 +167,7 @@ Seed 20261011 ; état aléatoire restauré après les calculs exploratoires.
 Validation : Rscript tests/validation_acm_imputation.R
              Rscript tests/validation_design.R
              Rscript tests/validation_pipeline_application.R
+             Rscript tests/validation_factorielles_mixtes.R
 
 4. MACHINE LEARNING
 Page d'évaluation chargée depuis resultats/ml/evaluation_finale.rds, sans calcul

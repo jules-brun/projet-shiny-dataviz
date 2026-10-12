@@ -153,7 +153,9 @@ function(input, output, session) {
           detail = paste("Jeu", i, "sur", total)))
       setProgress(value = .95, detail = "Projection des jeux sur l'ACM")
       acm <- calculer_acm_app(imps)
-      list(imputations = imps, acm = acm)
+      setProgress(value = .98, detail = "Projection des jeux sur l’AFDM")
+      afdm <- calculer_afdm_app(imps)
+      list(imputations = imps, acm = acm, afdm = afdm)
     }), error = function(e) { erreur(conditionMessage(e)); NULL })
     if (!is.null(nouvel)) {
       resultat(nouvel)
@@ -162,6 +164,9 @@ function(input, output, session) {
       dims <- setNames(seq_len(n), paste("Dimension", seq_len(n)))
       updateSelectInput(session, "axe_x", choices = dims, selected = 1)
       updateSelectInput(session, "axe_y", choices = dims, selected = 2)
+      dims_afdm <- seq_len(ncol(nouvel$afdm$individus[[1]]))
+      updateSelectInput(session, "axe_afdm_x", choices = setNames(dims_afdm, paste("Dimension", dims_afdm)), selected = 1)
+      updateSelectInput(session, "axe_afdm_y", choices = setNames(dims_afdm, paste("Dimension", dims_afdm)), selected = 2)
     }
   })
   output$statut_imputation <- renderText({
@@ -194,11 +199,16 @@ function(input, output, session) {
     nouveau <- tryCatch(withProgress(message = "Calcul de l’ACM", {
       if (mode == "modeles") {
         if (is.null(resultat())) stop("Calculer d’abord l’imputation sur Gestion des NA.")
+        if (!identical(selections(), resultat()$imputations$selections))
+          stop("Les modèles ont changé : recalculer l’imputation sur Gestion des NA avant l’ACM.")
         v <- if (lourdes) variables_acm_app else setdiff(variables_acm_app, acm_variables_lourdes)
         r <- calculer_acm_app(resultat()$imputations, variables = v)
         origine <- resultat()$imputations
       } else {
-        r <- acm_resultat_cache(donnees_uci, mode, lourdes, nboot)
+        quanti <- calculer_quantitatives_acm(donnees_uci, selections(), benchmark_app,
+            m = if (mode == "multiple") nboot else 1L,
+            imputations = if (is.null(resultat())) NULL else resultat()$imputations)
+        r <- acm_resultat_cache(donnees_uci, mode, lourdes, nboot, quantitatives = quanti)
         origine <- NULL
       }
       list(acm = r, mode = mode, lourdes = lourdes, nboot = nboot, origine = origine)
@@ -220,7 +230,8 @@ function(input, output, session) {
     if (is.null(r)) return("Les modèles choisis sont disponibles après calcul sur Gestion des NA. Pour les autres stratégies, cliquer sur Calculer l’ACM.")
     perime <- !identical(input$acm_mode, r$mode) || !identical(isTRUE(input$acm_lourdes), r$lourdes) ||
       (r$mode == "multiple" && !identical(as.integer(input$acm_nboot), r$nboot)) ||
-      (r$mode == "modeles" && !identical(resultat()$imputations, r$origine))
+      (r$mode == "modeles" && !identical(resultat()$imputations, r$origine)) ||
+      !identical(selections()[names(r$acm$quantitatives_selections)], r$acm$quantitatives_selections)
     paste("Résultat appliqué :", names(acm_modes)[match(r$mode, unname(acm_modes))],
       if (perime) "· Réglages modifiés : cliquer sur Calculer l’ACM pour les appliquer." else "")
   })
@@ -237,10 +248,15 @@ function(input, output, session) {
     a
   })
   output$acm_resume <- renderText(acm_texte_resultat(acm_resultat(), axes()))
+  output$acm_quantitatives <- renderPlot({
+    r <- acm_resultat()
+    validate(need(!is.null(r$ref$quanti.sup$coord), "Aucune mesure quantitative non constante à projeter."))
+    graphique_correlations_factorielles(r, axes())
+  }, bg = palette_heart$card)
   output$statut_ellipses <- renderText({
     if (!isTRUE(input$ellipses_acm)) return("")
     res <- acm_resultat()
-    if (res$m < 3L) return("Aucune ellipse : le résultat affiché comporte moins de trois jeux. Calculer des imputations multiples, puis appliquer la stratégie souhaitée avec Calculer l’ACM.")
+    if (res$m < 3L) return("ACM : aucune ellipse, ce résultat comporte moins de trois jeux. L’AFDM utilise séparément les jeux multiples calculés sur Gestion des NA.")
     limite <- if (is.null(input$limite_ellipses)) 60L else as.integer(input$limite_ellipses)
     req(is.finite(limite), limite > 0L)
     b <- bilan_ellipses_acm(res, axes(), limite)
@@ -269,5 +285,49 @@ function(input, output, session) {
     limite <- as.integer(req(input$limite_ellipses))
     validate(need(is.finite(limite) && limite > 0, "Choisir une limite d'ellipses positive."))
     graphe_acm_app(acm_resultat(), "individus", axes(), isTRUE(input$ellipses_acm), limite)
+  }, bg = palette_heart$card)
+  afdm_resultat <- reactive({
+    r <- resultat()
+    validate(need(!is.null(r$afdm), "Calculer les imputations sur Gestion des NA pour afficher l’AFDM sur toutes les variables."))
+    r$afdm
+  })
+  axes_afdm <- reactive({
+    a <- as.integer(c(req(input$axe_afdm_x), req(input$axe_afdm_y)))
+    validate(need(length(a) == 2L && length(unique(a)) == 2L && all(is.finite(a)) &&
+      all(a >= 1L) && all(a <= ncol(afdm_resultat()$individus[[1]])), "Choisir deux dimensions disponibles et différentes pour l’AFDM."))
+    a
+  })
+  output$afdm_statut <- renderText({
+    r <- afdm_resultat()
+    paste(r$m, "jeux imputés avec les modèles choisis sur Gestion des NA ·", length(r$variables),
+      "variables actives, dont la provenance · Diagnostic supplémentaire.",
+      if (!identical(selections(), r$selections) || (!is.null(input$nombre_imputations) &&
+          !identical(as.integer(input$nombre_imputations), as.integer(r$m))))
+        "Choix modifiés : recalculer l’imputation sur Gestion des NA pour les appliquer à l’AFDM." else "",
+      if (length(r$variables_exclues)) paste("Variables sans variation exclues :", paste(r$variables_exclues, collapse = ", ")) else "",
+      if (isTRUE(input$ellipses_acm)) {
+        limite <- if (is.null(input$limite_ellipses)) 60L else as.integer(input$limite_ellipses)
+        req(is.finite(limite), limite > 0L)
+        b <- bilan_ellipses_acm(r, axes_afdm(), limite)
+        nv <- length(unique(ellipses_app(nuage_acm_app(r, "associations", axes_afdm()))$id))
+        paste("Ellipses AFDM :", nv, "variables,", b$modalites[["affichees"]], "modalités,",
+          b$individus[["affichees"]], "individus affichés sur", b$individus[["disponibles"]], "positions variables.")
+      } else "")
+  })
+  output$afdm_valeurs_propres <- renderPlot({
+    r <- afdm_resultat(); z <- data.frame(dimension = seq_len(nrow(r$ref$eig)), valeur = r$ref$eig[, 1])
+    ggplot(z, aes(factor(dimension), valeur)) + geom_col(fill = palette_heart$blue) +
+      labs(x = "Dimension", y = "Valeur propre", subtitle = "Inertie de l’AFDM de référence") + theme_heart()
+  }, bg = palette_heart$card)
+  output$afdm_variables <- renderPlot(
+    graphique_variables_afdm(afdm_resultat(), axes_afdm(), isTRUE(input$ellipses_acm)), bg = palette_heart$card)
+  output$afdm_quantitatives <- renderPlot(
+    graphique_correlations_factorielles(afdm_resultat(), axes_afdm()), bg = palette_heart$card)
+  output$afdm_modalites <- renderPlot(
+    graphe_acm_app(afdm_resultat(), "modalites", axes_afdm(), isTRUE(input$ellipses_acm)), bg = palette_heart$card)
+  output$afdm_individus <- renderPlot({
+    limite <- as.integer(req(input$limite_ellipses))
+    validate(need(is.finite(limite) && limite > 0, "Choisir une limite d’ellipses positive."))
+    graphe_acm_app(afdm_resultat(), "individus", axes_afdm(), isTRUE(input$ellipses_acm), limite)
   }, bg = palette_heart$card)
 }

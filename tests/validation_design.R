@@ -16,14 +16,19 @@ ids <- c("effectifs", "distribution", "na_cumules", "na_detail",
   "calculer_imputation", "acm_valeurs_propres", "axe_x", "axe_y", "acm_modalites", "acm_individus")
 stopifnot(all(vapply(ids, function(id) grepl(paste0('id="', id, '"'), html, fixed = TRUE), logical(1))),
   !grepl("variabilité d'imputation (95 %)", html, fixed = TRUE), !grepl('id="ml_calibration"', html, fixed = TRUE))
-# La page n'ajoute aucun plotOutput/plotlyOutput à la référence noire.
+# Les sorties ajoutées sont celles des quantitatives supplémentaires et de l'AFDM.
 sorties <- function(texte) {
   motifs <- gregexpr('(plotOutput|plotlyOutput)\\("[^"]+"', texte, perl = TRUE)
   sort(regmatches(texte, motifs)[[1]])
 }
 reference <- system2("git", c("show", "main:ui.R"), stdout = TRUE)
-stopifnot(identical(sorties(paste(readLines("ui.R"), collapse = "\n")),
+stopifnot(identical(setdiff(sorties(paste(readLines("ui.R"), collapse = "\n")),
+                          paste0('plotOutput("', c("acm_quantitatives", "afdm_valeurs_propres",
+                            "afdm_variables", "afdm_quantitatives", "afdm_modalites", "afdm_individus"), '"')),
                     sorties(paste(reference, collapse = "\n"))))
 # Construction complète de l'objet Shiny, y compris les sources de l'app.
 stopifnot(inherits(source("app.R")$value, "shiny.appobj"))
+stopifnot(!grepl('id="acm_cholesterol"', html, fixed = TRUE),
+  all(vapply(c("acm_quantitatives", "afdm_variables", "afdm_quantitatives", "afdm_modalites", "afdm_individus"),
+    function(id) grepl(paste0('id="', id, '"'), html, fixed = TRUE), logical(1))))
 cat("Validation design : thème noir, quatre pages dans le même ordre, sorties existantes et objet Shiny.\n")
