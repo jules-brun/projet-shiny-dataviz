@@ -315,9 +315,13 @@ function(input, output, session) {
       } else "")
   })
   output$afdm_valeurs_propres <- renderPlot({
-    r <- afdm_resultat(); z <- data.frame(dimension = seq_len(nrow(r$ref$eig)), valeur = r$ref$eig[, 1])
-    ggplot(z, aes(factor(dimension), valeur)) + geom_col(fill = palette_heart$blue) +
-      labs(x = "Dimension", y = "Valeur propre", subtitle = "Inertie de l’AFDM de référence") + theme_heart()
+    # Pourcentage d'inertie de chaque dimension (colonne 2 de eig)
+    r <- afdm_resultat(); z <- data.frame(dimension = seq_len(nrow(r$ref$eig)), pct = r$ref$eig[, 2])
+    ggplot(z, aes(factor(dimension), pct)) + geom_col(fill = palette_heart$blue) +
+      geom_text(aes(label = sub(".", ",", sprintf("%.1f", pct), fixed = TRUE)), vjust = -.5,
+        colour = palette_heart$text, size = 3.6) +
+      scale_y_continuous(expand = expansion(mult = c(0, .12))) +
+      labs(x = "Dimension", y = "Pourcentage d'inertie (%)", subtitle = "Inertie de l’AFDM de référence") + theme_heart()
   }, bg = palette_heart$card)
   output$afdm_variables <- renderPlot(
     graphique_variables_afdm(afdm_resultat(), axes_afdm(), isTRUE(input$ellipses_acm)), bg = palette_heart$card)
