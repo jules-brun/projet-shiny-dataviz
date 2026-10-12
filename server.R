@@ -6,6 +6,7 @@ source("R/pipeline_application.R", local = TRUE)
 source("R/pedagogie_na.R", local = TRUE)
 source("R/ml_evaluation.R", local = TRUE)
 source("R/ml_interface.R", local = TRUE)
+source("R/a_propos.R", local = TRUE)
 
 charger_import <- function() {
   env <- new.env(parent = globalenv())
@@ -30,6 +31,7 @@ libelles_app <- setNames(import_uci$dictionnaire$libelle, import_uci$colonnes)
 bilan_perte_na <- calculer_perte_information(donnees_uci, import_uci$colonnes)
 
 function(input, output, session) {
+  observeEvent(input$ouvrir_a_propos, ouvrir_a_propos())
   ml_serveur(output, donnees_uci[c(import_uci$colonnes, "provenance")])
   output$perte_na_indicateurs <- renderUI(cartes_perte_information(bilan_perte_na))
   output$perte_na_graphique <- renderPlot(graphique_perte_information(bilan_perte_na),

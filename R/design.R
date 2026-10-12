@@ -3,7 +3,7 @@ palette_heart <- list(bg = "#080F1B", card = "#111D2D", panel = "#162438",
   text = "#EEF3FA", muted = "#A2B2C7", line = "#26364C",
   red = "#EF6473", blue = "#78A9DF", teal = "#64C4B2", amber = "#E5B36C")
 
-theme_heart <- function(base_size = 14, base_family = "sans") {
+theme_heart <- function(base_size = 16, base_family = "sans") {
   p <- palette_heart
   ggplot2::theme_minimal(base_size = base_size, base_family = base_family) +
     ggplot2::theme(

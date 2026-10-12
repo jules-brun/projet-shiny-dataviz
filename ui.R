@@ -3,6 +3,7 @@ library(bslib)
 source("R/design.R", local = TRUE)
 source("R/graphiques.R", local = TRUE)
 source("R/ml_interface.R", local = TRUE)
+source("R/variables.R", local = TRUE)
 
 page_navbar(
   title = div(class = "heart-brand", icone_heart("heart-pulse", "1.4em"),
@@ -20,6 +21,9 @@ page_navbar(
     carte_heart("Fusion des quatre centres", plotOutput("effectifs", height = "310px"),
       p(class = "note", "Les quatre tables sont empilées avec les mêmes 14 variables ; la provenance conserve le centre d'origine. Les effectifs ci-dessus sont ceux avant suppression des doublons."), icone = "geo-alt"),
     div(class = "callout", textOutput("bilan_doublons")),
+    carte_heart("Les variables", div(style = "overflow-x:auto;", tableau_variables_ui()),
+      p(class = "note", "La provenance (Cleveland, Hongrie, Suisse, VA Long Beach) est ajoutée lors de la fusion des fichiers."),
+      icone = "list-ul", plein_ecran = FALSE),
     carte_heart("Distribution d'une variable",
       selectInput("variable_distribution", "Variable", choices = NULL, selected = "cholesterol"),
       plotOutput("distribution", height = "380px"), textOutput("distribution_effectif"), icone = "bar-chart"),
@@ -107,5 +111,7 @@ page_navbar(
     carte_heart("ACM — modalités et variables supplémentaires", plotOutput("acm_modalites", height = "700px")),
     carte_heart("ACM — observations", plotOutput("acm_individus", height = "650px"))
   ),
-  nav_panel("Machine learning", icon = icone_heart("cpu"), value = "machine_learning", ml_ui())
+  nav_panel("Machine learning", icon = icone_heart("cpu"), value = "machine_learning", ml_ui()),
+  nav_spacer(),
+  nav_item(actionLink("ouvrir_a_propos", "À propos", icon = icone_heart("info-circle")))
 )

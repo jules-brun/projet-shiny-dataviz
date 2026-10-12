@@ -1,7 +1,13 @@
 # Page 4 : uniquement visualisation d'une expérience sauvegardée, aucun fit Shiny.
 ml_ui <- function() shiny::tagList(
+  # Schéma du protocole avec Mermaid (fichier local dans www/)
+  shiny::tags$head(shiny::tags$script(src = "mermaid.min.js"),
+    shiny::tags$script(shiny::HTML("mermaid.initialize({startOnLoad: false, theme: 'dark',
+      themeVariables: {fontSize: '18px', fontFamily: 'Inter, Segoe UI, Arial',
+      mainBkg: '#162438', primaryTextColor: '#EEF3FA', nodeBorder: '#78A9DF', lineColor: '#78A9DF',
+      clusterBkg: '#111D2D', clusterBorder: '#E5B36C', edgeLabelBackground: '#111D2D'}});"))),
   carte_heart("Machine learning",
-    shiny::plotOutput("ml_diagramme", height = "670px"),
+    shiny::uiOutput("ml_diagramme"),
     shiny::div(class = "callout", shiny::textOutput("ml_etat")),
     shiny::p(class = "note", "Le diagnostic 1 désigne la maladie. La provenance sert uniquement à stratifier et à examiner la robustesse ; elle est exclue de tous les prédicteurs, y compris ceux des imputations."), icone = "shield-lock"),
   carte_heart("Validation croisée sur TRAIN. Comparaison des modèles",
@@ -24,31 +30,21 @@ ml_ui <- function() shiny::tagList(
     shiny::p(class = "note", "La sensibilité n'est présentée qu'avec au moins 10 malades, la spécificité avec au moins 10 non-malades. L'AUC nécessite ces deux effectifs et au moins 30 observations. Des cases non définies indiquent une estimation trop fragile. Les barres montrent les IC de Wilson à 95 % de la sensibilité et de la spécificité ; ce graphique ne permet pas de conclure à une homogénéité entre centres."), icone = "geo-alt")
 )
 
-graphique_diagramme_ml <- function() {
-  labels <- c("Données nettoyées\nDiagnostic binaire", "Split stratifié\nTRAIN 80 % / TEST 20 %",
-    "TRAIN : CV à 5 folds", "Pour chaque fold\nMasques → imputation → préparation",
-    "Comparaison ML\nPrédictions", "Sélection sur TRAIN\nModèle + hyperparamètres + seuil",
-    "Pipeline figé\nRéentraînement sur TRAIN complet", "TEST déverrouillé une fois\nApplication du pipeline figé", "Évaluation finale\nRésultats enregistrés")
-  d <- data.frame(x = 4, y = seq(9, 1), label = labels)
-  f <- data.frame(x = 4, y = seq(8.68, 1.68), xend = 4, yend = seq(8.32, 1.32))
-  ggplot2::ggplot() + ggplot2::geom_segment(data = f, ggplot2::aes(x,y,xend=xend,yend=yend),
-      colour = palette_heart$blue, arrow = grid::arrow(length = grid::unit(.14,"cm"))) +
-    ggplot2::geom_label(data = d, ggplot2::aes(x,y,label=label), size = 4,
-      fill = palette_heart$panel, colour = palette_heart$text, linewidth = .3) +
-    ggplot2::annotate("segment", x = 5.8, xend = 8, y = 8, yend = 8, colour = palette_heart$amber,
-      arrow = grid::arrow(length = grid::unit(.14,"cm"))) +
-    ggplot2::annotate("rect", xmin = 7.7, xmax = 11.1, ymin = 2.9, ymax = 8.4,
-      fill = palette_heart$panel, colour = palette_heart$amber, linetype = "dashed") +
-    ggplot2::annotate("text", x = 9.4, y = 6, label = "TEST VERROUILLÉ\n\nAucune sélection\nAucun tuning\nAucun choix de seuil\n\nProvenance exclue\ndes prédicteurs",
-      colour = palette_heart$amber, size = 4) +
-    ggplot2::annotate("segment", x = 9.4, xend = 9.4, y = 2.9, yend = 2,
-      colour = palette_heart$amber, arrow = grid::arrow(length = grid::unit(.14,"cm"))) +
-    ggplot2::annotate("segment", x = 9.4, xend = 6.1, y = 2, yend = 2,
-      colour = palette_heart$amber, arrow = grid::arrow(length = grid::unit(.14,"cm"))) +
-    ggplot2::coord_cartesian(xlim = c(0,12), ylim=c(.4,9.7), clip="off") +
-    theme_heart() + ggplot2::theme(axis.text=ggplot2::element_blank(),axis.title=ggplot2::element_blank(),
-      axis.ticks=ggplot2::element_blank(), panel.grid.major=ggplot2::element_blank(),panel.grid.minor=ggplot2::element_blank())
-}
+# Mêmes étapes que l'ancien schéma ggplot, en Mermaid pour la lisibilité
+schema_mermaid_ml <- function() 'flowchart TD
+  A["Données nettoyées<br/>Diagnostic binaire"] --> B["Split stratifié<br/>TRAIN 80 % / TEST 20 %"]
+  B --> C["TRAIN : CV à 5 folds"]
+  C --> D["Pour chaque fold<br/>Masques → imputation → préparation"]
+  D --> E["Comparaison ML<br/>Prédictions"]
+  E --> F["Sélection sur TRAIN<br/>Modèle + hyperparamètres + seuil"]
+  F --> G["Pipeline figé<br/>Réentraînement sur TRAIN complet"]
+  G --> H["TEST déverrouillé une fois<br/>Application du pipeline figé"]
+  H --> I["Évaluation finale<br/>Résultats enregistrés"]
+  B --> T
+  subgraph T ["TEST VERROUILLÉ"]
+    T1["Aucune sélection<br/>Aucun tuning<br/>Aucun choix de seuil<br/>Provenance exclue des prédicteurs"]
+  end
+  T --> H'
 
 candidats_affiches_ml <- function(r) {
   z <- r$validation$choix$par_candidat
@@ -156,7 +152,9 @@ ml_serveur <- function(output, donnees) {
     shiny::validate(shiny::need(!is.null(r), "Expérience ML non disponible pour ces données. Lancer Rscript scripts/entrainer_ml.R, puis redémarrer Shiny."))
     r
   }
-  output$ml_diagramme <- shiny::renderPlot(graphique_diagramme_ml(), bg=palette_heart$card)
+  output$ml_diagramme <- shiny::renderUI(shiny::tagList(
+    shiny::div(class = "mermaid", style = "text-align:center;", schema_mermaid_ml()),
+    shiny::tags$script("mermaid.run({querySelector: '.mermaid'});")))
   output$ml_etat <- shiny::renderText({
     if (is.null(r)) return("Calcul hors application : Rscript scripts/entrainer_ml.R. Aucun accès à TEST lors de l'affichage de cette page.")
     paste("Expérience enregistrée le",r$date,"·",length(r$manifeste$split$train),"TRAIN /",
