@@ -12,7 +12,7 @@ page_navbar(
   lang = "fr", theme = theme_application_heart(), fillable = FALSE,
   navbar_options = navbar_options(bg = palette_heart$bg, theme = "dark", underline = FALSE),
   header = tagList(tags$head(tags$link(rel = "stylesheet", type = "text/css", href = "style.css")),
-    div(class = "diagnostic-heading", h1("Diagnostic cardiaque et prédiction."),
+    div(class = "diagnostic-heading", h1("Diagnostic cardiaque et prédiction"),
       div(class = "diagnostic-signal", `aria-hidden` = "true",
         HTML('<svg viewBox="0 0 440 190" focusable="false"><path d="M0 106H72L87 90L103 106H139L153 125L173 40L195 156L215 85L230 106H267L286 96L302 106H440" fill="none" stroke="#EF6473" stroke-width="2.7" stroke-linejoin="round" stroke-linecap="round"/></svg>')))),
   nav_panel("Données", icon = icone_heart("database"), value = "donnees",
@@ -108,8 +108,8 @@ page_navbar(
       p(class = "note", "Cas complets, ACM régularisée et MIMCA : les individus montrent uniquement le jeu de référence, sans ellipse individuelle. Avec les modèles choisis, les positions moyennes et les ellipses individuelles déjà calculées restent disponibles."),
       textOutput("acm_resume"),
       textOutput("statut_ellipses"), plein_ecran = FALSE),
-    carte_heart("ACM — modalités et variables supplémentaires", plotOutput("acm_modalites", height = "700px")),
-    carte_heart("ACM — observations", plotOutput("acm_individus", height = "650px"))
+    carte_heart("ACM : modalités", plotOutput("acm_modalites", height = "700px")),
+    carte_heart("ACM : individus", plotOutput("acm_individus", height = "650px"))
   ),
   nav_panel("Machine learning", icon = icone_heart("cpu"), value = "machine_learning", ml_ui()),
   nav_spacer(),

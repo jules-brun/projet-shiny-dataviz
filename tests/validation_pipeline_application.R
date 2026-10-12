@@ -9,7 +9,7 @@ stopifnot(all(vapply(c("donnees", "manquantes", "acm"), function(v)
   grepl(paste0('data-value="', v, '"'), html, fixed = TRUE), logical(1))),
   !grepl('data-value="overview"|data-value="relations"|data-value="associations"|data-value="apropos"', html),
   !grepl("UCI HEART DISEASE · EXPLORATION CLINIQUE", html, fixed = TRUE),
-  grepl("Diagnostic cardiaque et prédiction.", html, fixed = TRUE),
+  grepl("Diagnostic cardiaque et prédiction", html, fixed = TRUE),
   grepl("Justification bibliographique", html, fixed = TRUE),
   import_uci$bilan_nettoyage$n_doublons_retires == 2)
 # Les distributions intermédiaires gardent les zéros ; les ? sont déjà des NA.
